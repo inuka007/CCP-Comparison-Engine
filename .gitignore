@@ -1,0 +1,46 @@
+# Excel temporary files
+~$*.xlsx
+*.xlsm
+*.xls
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output files (keep folder structure but ignore generated results)
+output_results/*.xlsx
+!output_results/.gitkeep
+
+# Logs
+*.log
