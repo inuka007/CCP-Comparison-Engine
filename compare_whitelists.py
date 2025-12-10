@@ -224,20 +224,28 @@ print(f"✔ AT records: {len(at)}\n")
 # ALIGN CCP → AT STRUCTURE
 # ================================
 print("Aligning CCP columns according to mapping...")
+print("   Note: CCP-only fields are marked with 'ccp_only_' prefix")
+print("         These fields will NOT be used in config comparison\n")
 
-# Start with the symbol and exchange
+# Start with the symbol and exchange (primary comparison keys)
 aligned_ccp = pd.DataFrame()
 aligned_ccp[at_symbol_col] = ccp_combined[ccp_symbol_col]
 aligned_ccp["exchange"] = ccp_combined["exchange"]
 aligned_ccp["composite_key"] = ccp_combined["composite_key"]
+
+# Count CCP-only vs mapped columns
+ccp_only_count = 0
+mapped_count = 0
 
 # Map columns according to mapping file
 for _, row in mapping.iterrows():
     ccp_col = row["ccp_column"]
     at_col = row["at_column"]
 
-    # If AT column is empty, store CCP-only columns separately
+    # If AT column is empty, this is a CCP-ONLY field (not in AT)
+    # Store separately and EXCLUDE from comparison
     if at_col == "":
+        ccp_only_count += 1
         if ccp_col in ccp_combined.columns:
             aligned_ccp[f"ccp_only_{ccp_col}"] = ccp_combined[ccp_col]
         else:
@@ -245,12 +253,15 @@ for _, row in mapping.iterrows():
         continue
 
     # Normal CCP → AT mapping: rename CCP column to AT column name
+    mapped_count += 1
     if ccp_col in ccp_combined.columns:
         aligned_ccp[at_col] = ccp_combined[ccp_col]
     else:
         aligned_ccp[at_col] = np.nan
 
-print("✔ CCP aligned to AT structure.\n")
+print(f"✔ CCP aligned to AT structure.")
+print(f"   Mapped columns (will be compared): {mapped_count}")
+print(f"   CCP-only columns (excluded): {ccp_only_count}\n")
 
 
 # ================================
@@ -289,13 +300,23 @@ print(f"✔ Found {len(requirement_2)} symbols in AT but not in CCP\n")
 # REQUIREMENT 3: CONFIG MISMATCHES (In both CCP and AT)
 # ================================
 print("REQUIREMENT 3: Identifying config mismatches...")
-print("   This may take a minute with large datasets...\n")
+print("   Comparison basis: symbol + exchange (composite key)")
+print("   Comparing ONLY mapped columns (CCP-only fields are excluded)\n")
 
 common_keys = ccp_keys & at_keys
 requirement_3_list = []
 
-# Get only mapped columns for comparison (more efficient)
+# Get ONLY mapped columns for comparison (EXCLUDES CCP-only fields where AT column is empty)
+# This ensures we only compare fields that exist in BOTH systems
 mapped_cols = mapping[mapping["at_column"] != ""][["ccp_column", "at_column"]].values
+ccp_only_fields = mapping[mapping["at_column"] == ""]["ccp_column"].tolist()
+
+print(f"   Total records with symbol+exchange in both CCP & AT: {len(common_keys)}")
+print(f"   Mapped columns to compare: {len(mapped_cols)}")
+print(f"   CCP-only columns (EXCLUDED): {len(ccp_only_fields)}")
+if ccp_only_fields:
+    print(f"   CCP-only fields excluded: {', '.join(ccp_only_fields[:3])}" + ("..." if len(ccp_only_fields) > 3 else ""))
+print("   Processing comparisons...\n")
 
 # Convert to sets for faster lookup
 ccp_by_key = {key: ccp_combined[ccp_combined["composite_key"] == key].iloc[0] for key in common_keys}
