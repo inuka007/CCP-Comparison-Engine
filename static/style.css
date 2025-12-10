@@ -1,0 +1,462 @@
+/* ================================
+   CCP-AT Comparison Engine - Styles
+   ================================ */
+
+:root {
+    --primary-color: #0d6efd;
+    --success-color: #198754;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #0dcaf0;
+    --light-bg: #f8f9fa;
+    --border-color: #dee2e6;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: #f5f7fa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ================================
+   Navigation Bar
+   ================================ */
+
+.navbar {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+}
+
+.navbar-brand {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* ================================
+   Step Cards
+   ================================ */
+
+.step-card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    margin-bottom: 2rem;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.step-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.step-card .card-header {
+    border-radius: 8px 8px 0 0;
+    padding: 1.25rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.step-number {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+/* ================================
+   Upload Area
+   ================================ */
+
+.upload-area {
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 3rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    background-color: var(--light-bg);
+}
+
+.upload-area:hover {
+    border-color: var(--primary-color);
+    background-color: rgba(13, 110, 253, 0.05);
+    color: var(--primary-color);
+}
+
+.upload-area.drag-over {
+    border-color: var(--primary-color);
+    background-color: rgba(13, 110, 253, 0.1);
+    color: var(--primary-color);
+}
+
+.upload-area i {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+    opacity: 0.7;
+}
+
+.upload-area p {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.upload-area small {
+    display: block;
+}
+
+/* ================================
+   Files List
+   ================================ */
+
+.file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background-color: var(--light-bg);
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+    border-left: 3px solid var(--success-color);
+}
+
+.file-item i {
+    margin-right: 0.75rem;
+    color: var(--success-color);
+}
+
+.file-item .file-name {
+    flex-grow: 1;
+    font-weight: 500;
+}
+
+.file-item .file-size {
+    color: #6c757d;
+    font-size: 0.9rem;
+    margin-right: 1rem;
+}
+
+.file-item .btn-close {
+    padding: 0.25rem;
+}
+
+/* ================================
+   Validation Results
+   ================================ */
+
+.validation-check {
+    display: flex;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    border-radius: 6px;
+    background-color: var(--light-bg);
+}
+
+.validation-check.valid {
+    background-color: #d1e7dd;
+    border-left: 3px solid var(--success-color);
+    color: #0f5132;
+}
+
+.validation-check.error {
+    background-color: #f8d7da;
+    border-left: 3px solid var(--danger-color);
+    color: #842029;
+}
+
+.validation-check.warning {
+    background-color: #fff3cd;
+    border-left: 3px solid var(--warning-color);
+    color: #664d03;
+}
+
+.validation-check i {
+    margin-right: 0.75rem;
+    font-weight: 600;
+}
+
+/* ================================
+   Buttons
+   ================================ */
+
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+    padding: 0.5rem 1.25rem;
+    transition: all 0.2s;
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-primary:not(:disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(13, 110, 253, 0.4);
+}
+
+.btn-success:not(:disabled):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(25, 135, 84, 0.4);
+}
+
+.btn-lg {
+    padding: 0.75rem 2rem;
+    font-size: 1.1rem;
+}
+
+/* ================================
+   Processing Spinner
+   ================================ */
+
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* ================================
+   Statistics Dashboard
+   ================================ */
+
+.stat-card {
+    border: 1px solid var(--border-color);
+    transition: all 0.2s;
+}
+
+.stat-card:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+    transform: translateY(-2px);
+}
+
+.stat-card h3 {
+    margin-bottom: 0.5rem;
+    font-weight: 700;
+    font-size: 2rem;
+}
+
+.stat-card h6 {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+/* ================================
+   Tabs
+   ================================ */
+
+.nav-tabs {
+    border-bottom: 2px solid var(--border-color);
+}
+
+.nav-tabs .nav-link {
+    color: #6c757d;
+    border: none;
+    border-bottom: 3px solid transparent;
+    padding: 0.75rem 1.5rem;
+    font-weight: 500;
+    transition: all 0.2s;
+    position: relative;
+}
+
+.nav-tabs .nav-link:hover {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--primary-color);
+    background-color: transparent;
+    border-bottom-color: var(--primary-color);
+}
+
+.nav-tabs .badge {
+    margin-left: 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* ================================
+   Requirement Info
+   ================================ */
+
+.requirement-info {
+    border-left: 4px solid;
+    margin-bottom: 1.5rem;
+}
+
+.requirement-info h6 {
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.requirement-info p {
+    margin-bottom: 0 !important;
+}
+
+/* ================================
+   Tables
+   ================================ */
+
+.table {
+    margin-bottom: 0;
+    font-size: 0.95rem;
+}
+
+.table thead th {
+    font-weight: 600;
+    color: #333;
+    border-bottom: 2px solid var(--border-color);
+    background-color: #f8f9fa;
+}
+
+.table tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: #f8f9fa;
+}
+
+.table-sm thead th {
+    padding: 0.75rem;
+}
+
+.table-sm tbody td {
+    padding: 0.75rem;
+}
+
+/* ================================
+   Alerts
+   ================================ */
+
+.alert {
+    border-radius: 6px;
+    border: none;
+    padding: 1rem 1.25rem;
+}
+
+.alert-success {
+    background-color: #d1e7dd;
+    color: #0f5132;
+}
+
+.alert-danger {
+    background-color: #f8d7da;
+    color: #842029;
+}
+
+.alert-warning {
+    background-color: #fff3cd;
+    color: #664d03;
+}
+
+.alert-info {
+    background-color: #cfe2ff;
+    color: #084298;
+}
+
+/* ================================
+   Footer
+   ================================ */
+
+footer {
+    margin-top: auto;
+}
+
+footer p {
+    margin: 0;
+}
+
+footer a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+/* ================================
+   Responsive Design
+   ================================ */
+
+@media (max-width: 768px) {
+    .upload-area {
+        padding: 2rem 1rem;
+    }
+
+    .upload-area i {
+        font-size: 2rem;
+    }
+
+    .nav-tabs .nav-link {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+
+    .nav-tabs .badge {
+        display: none;
+    }
+
+    .stat-card h3 {
+        font-size: 1.5rem;
+    }
+
+    .table-responsive {
+        font-size: 0.85rem !important;
+    }
+
+    .btn {
+        font-size: 0.9rem;
+        padding: 0.4rem 1rem;
+    }
+}
+
+/* ================================
+   Animations
+   ================================ */
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.step-card {
+    animation: slideIn 0.3s ease-out;
+}
+
+/* ================================
+   Loading & Processing States
+   ================================ */
+
+.processing {
+    opacity: 0.6;
+    pointer-events: none;
+}
+
+.hidden {
+    display: none !important;
+}
+
+.visible {
+    display: block !important;
+}
