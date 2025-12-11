@@ -33,13 +33,13 @@
             <div class="card-body">
                 <p class="text-muted mb-3">
                     <i class="bi bi-info-circle"></i>
-                    Upload the required Excel files for comparison. All 4 files must be included.
+                    Upload the required Excel files for comparison. All 3 files must be included.
                 </p>
 
                 <!-- Required Files Checklist -->
                 <div class="row mb-4">
                     <div class="col-md-6">
-                        <h6 class="mb-3"><strong>Required Files:</strong></h6>
+                        <h6 class="mb-3"><strong>Required Files (3):</strong></h6>
                         <div class="form-check mb-2">
                             <input class="form-check-input" type="checkbox" disabled id="check1">
                             <label class="form-check-label" for="check1">
@@ -60,11 +60,9 @@
                                 AT_Whitelist.xlsx
                             </label>
                         </div>
-                        <div class="form-check mb-2">
-                            <input class="form-check-input" type="checkbox" disabled id="check4">
-                            <label class="form-check-label" for="check4">
-                                Column_Mapping.xlsx
-                            </label>
+                        <div class="form-check mb-2" style="opacity: 0.6; margin-top: 1rem;">
+                            <i class="bi bi-server"></i>
+                            <small class="text-muted">Column_Mapping.xlsx (server-managed)</small>
                         </div>
                     </div>
                 </div>
@@ -169,95 +167,93 @@
                     </div>
                 </div>
 
-                <!-- Requirements Tabs -->
-                <ul class="nav nav-tabs mb-4" id="requirementsTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="req1-tab" data-bs-toggle="tab" data-bs-target="#req1-content" type="button" role="tab">
-                            <i class="bi bi-plus-circle"></i> Requirement 1
-                            <span class="badge bg-danger" id="req1-badge">0</span>
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="req2-tab" data-bs-toggle="tab" data-bs-target="#req2-content" type="button" role="tab">
-                            <i class="bi bi-question-circle"></i> Requirement 2
-                            <span class="badge bg-warning" id="req2-badge">0</span>
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="req3-tab" data-bs-toggle="tab" data-bs-target="#req3-content" type="button" role="tab">
-                            <i class="bi bi-exclamation-circle"></i> Requirement 3
-                            <span class="badge bg-info" id="req3-badge">0</span>
-                        </button>
-                    </li>
-                </ul>
-
-                <div class="tab-content" id="requirementsContent">
-                    <!-- Requirement 1 -->
-                    <div class="tab-pane fade show active" id="req1-content" role="tabpanel">
-                        <div class="requirement-info alert alert-danger" role="alert">
-                            <h6><i class="bi bi-plus-circle"></i> <strong>Securities in CCP but NOT in AT</strong></h6>
-                            <p class="mb-0 small">Action: <strong>ADD to AT Asia Whitelist</strong></p>
+                <!-- Comparison Summary -->
+                <div class="row mt-4" id="comparisonSummary" style="display: none;">
+                    <div class="col-md-6">
+                        <div class="card border-danger">
+                            <div class="card-header bg-danger text-white">
+                                <h6 class="mb-0"><i class="bi bi-plus-circle"></i> Requirement 1: CCP → AT</h6>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted mb-2 small">Securities in CCP but NOT in AT</p>
+                                <h3 class="text-danger" id="req1-count">0</h3>
+                                <p class="text-muted mb-0 small"><strong>Action:</strong> ADD to AT Asia Whitelist</p>
+                            </div>
                         </div>
-                        <div class="table-responsive mb-3" id="req1-table-container" style="max-height: 500px; overflow-y: auto;">
-                            <table class="table table-sm table-striped" id="req1-table">
-                                <thead class="table-light sticky-top">
-                                    <tr id="req1-header"></tr>
-                                </thead>
-                                <tbody id="req1-body"></tbody>
-                            </table>
-                        </div>
-                        <button class="btn btn-outline-danger btn-sm" onclick="downloadResults('req1')">
-                            <i class="bi bi-download"></i> Download as Excel
-                        </button>
                     </div>
-
-                    <!-- Requirement 2 -->
-                    <div class="tab-pane fade" id="req2-content" role="tabpanel">
-                        <div class="requirement-info alert alert-warning" role="alert">
-                            <h6><i class="bi bi-question-circle"></i> <strong>Securities in AT but NOT in CCP</strong></h6>
-                            <p class="mb-0 small">Action: <strong>REVIEW activity/positions - DELETE or ADD to Exception List</strong></p>
+                    <div class="col-md-6">
+                        <div class="card border-warning">
+                            <div class="card-header bg-warning text-dark">
+                                <h6 class="mb-0"><i class="bi bi-question-circle"></i> Requirement 2: AT → CCP</h6>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted mb-2 small">Securities in AT but NOT in CCP</p>
+                                <h3 class="text-warning" id="req2-count">0</h3>
+                                <p class="text-muted mb-0 small"><strong>Action:</strong> REVIEW/DELETE or ADD to Exception List</p>
+                            </div>
                         </div>
-                        <div class="table-responsive mb-3" id="req2-table-container" style="max-height: 500px; overflow-y: auto;">
-                            <table class="table table-sm table-striped" id="req2-table">
-                                <thead class="table-light sticky-top">
-                                    <tr id="req2-header"></tr>
-                                </thead>
-                                <tbody id="req2-body"></tbody>
-                            </table>
-                        </div>
-                        <button class="btn btn-outline-warning btn-sm" onclick="downloadResults('req2')">
-                            <i class="bi bi-download"></i> Download as Excel
-                        </button>
                     </div>
-
-                    <!-- Requirement 3 -->
-                    <div class="tab-pane fade" id="req3-content" role="tabpanel">
-                        <div class="requirement-info alert alert-info" role="alert">
-                            <h6><i class="bi bi-exclamation-circle"></i> <strong>Securities with Config Mismatches</strong></h6>
-                            <p class="mb-0 small">Action: <strong>UPDATE AT to match CCP & Setup Market Exception rule</strong></p>
+                    <div class="col-md-6 mt-3">
+                        <div class="card border-info">
+                            <div class="card-header bg-info text-white">
+                                <h6 class="mb-0"><i class="bi bi-exclamation-circle"></i> Requirement 3: Mismatch</h6>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted mb-2 small">Securities with Config Mismatches</p>
+                                <h3 class="text-info" id="req3-count">0</h3>
+                                <p class="text-muted mb-0 small"><strong>Action:</strong> UPDATE AT to match CCP</p>
+                            </div>
                         </div>
-                        <div class="table-responsive mb-3" id="req3-table-container" style="max-height: 500px; overflow-y: auto;">
-                            <table class="table table-sm table-striped" id="req3-table">
-                                <thead class="table-light sticky-top">
-                                    <tr id="req3-header"></tr>
-                                </thead>
-                                <tbody id="req3-body"></tbody>
-                            </table>
-                        </div>
-                        <button class="btn btn-outline-info btn-sm" onclick="downloadResults('req3')">
-                            <i class="bi bi-download"></i> Download as Excel
-                        </button>
                     </div>
                 </div>
 
-                <!-- Download All & Reset Buttons -->
-                <div class="mt-4 pt-3 border-top">
-                    <button class="btn btn-primary" onclick="downloadResults('report')">
-                        <i class="bi bi-file-earmark-pdf"></i> Download Summary Report
-                    </button>
-                    <button class="btn btn-outline-secondary" id="resetBtn">
-                        <i class="bi bi-arrow-clockwise"></i> Start Over
-                    </button>
+                <!-- Download Panel -->
+                <div class="mt-4 pt-4 border-top" id="downloadPanel" style="display: none;">
+                    <h6 class="mb-3"><i class="bi bi-download"></i> <strong>Download Results</strong></h6>
+                    <p class="text-muted small mb-3">Download comparison results as Excel files or complete bundle:</p>
+                    
+                    <!-- ZIP Bundle Download (Prominent) -->
+                    <div class="alert alert-info mb-3" style="border-left: 4px solid #0dcaf0;">
+                        <button class="btn btn-info w-100 py-2 mb-2" onclick="downloadResults('zip')">
+                            <i class="bi bi-file-earmark-zip"></i> <strong>Download All Results as ZIP</strong>
+                            <br><small>All files in one convenient bundle</small>
+                        </button>
+                    </div>
+                    
+                    <p class="text-muted small mb-2"><strong>Or download individual files:</strong></p>
+                    
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <button class="btn btn-danger w-100 py-2" onclick="downloadResults('req1')">
+                                <i class="bi bi-file-earmark-excel"></i> Requirement 1
+                                <br><small id="req1-file-count">0 records</small>
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <button class="btn btn-warning w-100 py-2" onclick="downloadResults('req2')">
+                                <i class="bi bi-file-earmark-excel"></i> Requirement 2
+                                <br><small id="req2-file-count">0 records</small>
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <button class="btn btn-info w-100 py-2" onclick="downloadResults('req3')">
+                                <i class="bi bi-file-earmark-excel"></i> Requirement 3
+                                <br><small id="req3-file-count">0 records</small>
+                            </button>
+                        </div>
+                        <div class="col-md-6">
+                            <button class="btn btn-success w-100 py-2" onclick="downloadResults('report')">
+                                <i class="bi bi-file-earmark-excel"></i> Summary Report
+                                <br><small>All statistics</small>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <button class="btn btn-outline-primary w-100" id="resetBtn">
+                            <i class="bi bi-arrow-clockwise"></i> Start Over
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

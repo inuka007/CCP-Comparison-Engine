@@ -14,37 +14,76 @@ let appState = {
 };
 
 // ================================
-// FILE UPLOAD HANDLING
+// GLOBAL ELEMENT REFERENCES
 // ================================
 
-const uploadArea = document.getElementById('uploadArea');
-const fileInput = document.getElementById('fileInput');
-const uploadBtn = document.getElementById('uploadBtn');
-const clearFilesBtn = document.getElementById('clearFilesBtn');
+let uploadArea, fileInput, uploadBtn, clearFilesBtn, compareBtn, resetBtn;
 
-// Click upload area to open file selector
-uploadArea.addEventListener('click', () => fileInput.click());
+// ================================
+// DOM INITIALIZATION
+// ================================
 
-// Handle file selection
-fileInput.addEventListener('change', handleFileSelect);
+function initializeElements() {
+    uploadArea = document.getElementById('uploadArea');
+    fileInput = document.getElementById('fileInput');
+    uploadBtn = document.getElementById('uploadBtn');
+    clearFilesBtn = document.getElementById('clearFilesBtn');
+    compareBtn = document.getElementById('compareBtn');
+    resetBtn = document.getElementById('resetBtn');
+    
+    attachEventListeners();
+}
 
-// Drag and drop functionality
-uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.classList.add('drag-over');
-});
+function attachEventListeners() {
+    // Upload area click
+    uploadArea.addEventListener('click', () => fileInput.click());
+    
+    // File input change
+    fileInput.addEventListener('change', handleFileSelect);
+    
+    // Drag and drop
+    uploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadArea.classList.add('drag-over');
+    });
+    
+    uploadArea.addEventListener('dragleave', () => {
+        uploadArea.classList.remove('drag-over');
+    });
+    
+    uploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadArea.classList.remove('drag-over');
+        const files = Array.from(e.dataTransfer.files);
+        fileInput.files = createFileList(files);
+        handleFileSelect();
+    });
+    
+    // Upload button
+    uploadBtn.addEventListener('click', uploadFiles);
+    
+    // Clear files button
+    clearFilesBtn.addEventListener('click', clearFiles);
+    
+    // Compare button
+    compareBtn.addEventListener('click', runComparison);
+    
+    // Reset button
+    resetBtn.addEventListener('click', resetSession);
+}
 
-uploadArea.addEventListener('dragleave', () => {
-    uploadArea.classList.remove('drag-over');
-});
+function clearFiles() {
+    appState.uploadedFiles = [];
+    document.getElementById('filesList').style.display = 'none';
+    uploadBtn.disabled = true;
+    clearFilesBtn.style.display = 'none';
+    fileInput.value = '';
+    document.getElementById('validationResults').style.display = 'none';
+}
 
-uploadArea.addEventListener('drop', (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove('drag-over');
-    const files = Array.from(e.dataTransfer.files);
-    fileInput.files = createFileList(files);
-    handleFileSelect();
-});
+// ================================
+// FILE SELECTION & UPLOAD
+// ================================
 
 function handleFileSelect() {
     const files = Array.from(fileInput.files);
@@ -95,20 +134,9 @@ function removeFile(index) {
     }
 }
 
-clearFilesBtn.addEventListener('click', () => {
-    appState.uploadedFiles = [];
-    document.getElementById('filesList').style.display = 'none';
-    uploadBtn.disabled = true;
-    clearFilesBtn.style.display = 'none';
-    fileInput.value = '';
-    document.getElementById('validationResults').style.display = 'none';
-});
-
 // ================================
 // FILE UPLOAD API CALL
 // ================================
-
-uploadBtn.addEventListener('click', uploadFiles);
 
 async function uploadFiles() {
     if (appState.uploadedFiles.length === 0) {
@@ -117,7 +145,7 @@ async function uploadFiles() {
     }
     
     uploadBtn.disabled = true;
-    uploadBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Uploading...';
+    uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading...';
     
     const formData = new FormData();
     appState.uploadedFiles.forEach(file => {
@@ -125,16 +153,27 @@ async function uploadFiles() {
     });
     
     try {
+        console.log('✓ Uploading files:', appState.uploadedFiles.map(f => f.name));
+        
         const response = await fetch('/api/upload', {
             method: 'POST',
             body: formData
         });
         
         const data = await response.json();
+        console.log('✓ Upload response:', data);
         
         if (response.ok) {
             appState.validationResult = data.validation;
             displayValidationResults(data.validation);
+            
+            // Show success state
+            uploadBtn.disabled = true;
+            uploadBtn.classList.add('btn-success');
+            uploadBtn.classList.remove('btn-primary');
+            uploadBtn.innerHTML = '<i class="bi bi-check-circle"></i> Files Uploaded & Validated ✓';
+            clearFilesBtn.disabled = true;
+            
             showAlert('success', 'Files uploaded and validated successfully!');
             
             // Move to step 2
@@ -148,7 +187,7 @@ async function uploadFiles() {
             uploadBtn.innerHTML = '<i class="bi bi-upload"></i> Upload Files';
         }
     } catch (error) {
-        console.error('Error uploading files:', error);
+        console.error('✗ Error uploading files:', error);
         showAlert('error', 'Error uploading files: ' + error.message);
         uploadBtn.disabled = false;
         uploadBtn.innerHTML = '<i class="bi bi-upload"></i> Upload Files';
@@ -196,8 +235,6 @@ function displayValidationResults(validation) {
                     <i class="bi bi-check-circle-fill"></i>
                     <span><strong>${filename}</strong> - ${status.rows} rows, ${status.columns} columns</span>
                 `;
-                
-                // Update checklist
                 updateChecklist(filename, true);
             } else if (status.status === 'error') {
                 statusDiv.className = 'validation-check error';
@@ -237,12 +274,13 @@ function updateChecklist(filename, valid) {
 // COMPARISON EXECUTION
 // ================================
 
-const compareBtn = document.getElementById('compareBtn');
-compareBtn.addEventListener('click', runComparison);
-
 async function runComparison() {
+    console.log('✓ Run Comparison button clicked');
+    console.log('✓ Current appState:', appState);
+    console.log('✓ Making POST request to /api/compare');
+    
     compareBtn.disabled = true;
-    compareBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing...';
+    compareBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing... Please wait (this may take 30-60 seconds)';
     
     const processingSpinner = document.getElementById('processingSpinner');
     processingSpinner.style.display = 'block';
@@ -255,16 +293,21 @@ async function runComparison() {
             }
         });
         
+        console.log('✓ Response received with status:', response.status);
         const data = await response.json();
+        console.log('✓ Response data:', data);
         
         if (response.ok) {
+            console.log('✓ Comparison successful');
             appState.comparisonResults = data;
             
+            console.log('✓ Fetching detailed results...');
             // Fetch and display results
             await fetchAndDisplayResults();
             
-            showAlert('success', 'Comparison completed successfully!');
+            showAlert('success', 'Comparison completed successfully! ✓');
             
+            console.log('✓ Displaying step 3 results');
             // Move to step 3
             document.getElementById('step2').style.opacity = '0.8';
             document.getElementById('step2').style.pointerEvents = 'none';
@@ -276,10 +319,12 @@ async function runComparison() {
                 document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
             }, 300);
         } else {
-            showAlert('error', data.error || 'Comparison failed');
+            console.error('✗ Comparison error - Server returned error:', response.status, data);
+            showAlert('error', data.error || 'Comparison failed. Error: ' + response.status);
         }
     } catch (error) {
-        console.error('Error running comparison:', error);
+        console.error('✗ Error running comparison:', error);
+        console.error('✗ Error details:', error.stack);
         showAlert('error', 'Error running comparison: ' + error.message);
     } finally {
         compareBtn.disabled = false;
@@ -294,19 +339,21 @@ async function runComparison() {
 
 async function fetchAndDisplayResults() {
     try {
+        console.log('✓ Fetching /api/results');
         const response = await fetch('/api/results');
         const data = await response.json();
         
+        console.log('✓ Results data received:', data);
+        
         if (response.ok) {
             displayStatistics(data.statistics);
-            displayRequirementData(data.requirement_1, 'req1');
-            displayRequirementData(data.requirement_2, 'req2');
-            displayRequirementData(data.requirement_3, 'req3');
+            displaySummaryCards(data.statistics);
+            showDownloadPanel();
         } else {
             showAlert('error', 'Error fetching results: ' + data.error);
         }
     } catch (error) {
-        console.error('Error fetching results:', error);
+        console.error('✗ Error fetching results:', error);
         showAlert('error', 'Error fetching results: ' + error.message);
     }
 }
@@ -321,71 +368,31 @@ function displayStatistics(stats) {
     document.getElementById('stat-common').textContent = stats.total_common.toLocaleString();
     document.getElementById('stat-action').textContent = stats.total_action_required.toLocaleString();
     
-    document.getElementById('req1-badge').textContent = stats.requirement_1_count;
-    document.getElementById('req2-badge').textContent = stats.requirement_2_count;
-    document.getElementById('req3-badge').textContent = stats.requirement_3_count;
-    
     document.getElementById('statisticsDashboard').style.display = 'block';
 }
 
 // ================================
-// DISPLAY REQUIREMENT DATA
+// DISPLAY SUMMARY CARDS
 // ================================
 
-function displayRequirementData(requirement, reqId) {
-    const header = document.getElementById(`${reqId}-header`);
-    const body = document.getElementById(`${reqId}-body`);
+function displaySummaryCards(stats) {
+    document.getElementById('req1-count').textContent = stats.requirement_1_count.toLocaleString();
+    document.getElementById('req2-count').textContent = stats.requirement_2_count.toLocaleString();
+    document.getElementById('req3-count').textContent = stats.requirement_3_count.toLocaleString();
     
-    header.innerHTML = '';
-    body.innerHTML = '';
+    document.getElementById('req1-file-count').textContent = stats.requirement_1_count.toLocaleString() + ' records';
+    document.getElementById('req2-file-count').textContent = stats.requirement_2_count.toLocaleString() + ' records';
+    document.getElementById('req3-file-count').textContent = stats.requirement_3_count.toLocaleString() + ' records';
     
-    if (!requirement.data || requirement.data.length === 0) {
-        const emptyRow = document.createElement('tr');
-        emptyRow.innerHTML = '<td colspan="100%" class="text-center text-muted py-4">No records found</td>';
-        body.appendChild(emptyRow);
-        return;
-    }
-    
-    // Get column names from first record
-    const columns = Object.keys(requirement.data[0]);
-    
-    // Create header
-    columns.forEach(col => {
-        const th = document.createElement('th');
-        th.textContent = col.replace(/_/g, ' ').toUpperCase();
-        header.appendChild(th);
-    });
-    
-    // Create rows (limited to first 100)
-    requirement.data.forEach((record, index) => {
-        const row = document.createElement('tr');
-        columns.forEach(col => {
-            const td = document.createElement('td');
-            const value = record[col];
-            
-            // Truncate long values
-            let displayValue = value || '';
-            if (typeof displayValue === 'string' && displayValue.length > 50) {
-                displayValue = displayValue.substring(0, 50) + '...';
-                td.title = value;
-            }
-            
-            td.textContent = displayValue;
-            row.appendChild(td);
-        });
-        body.appendChild(row);
-    });
-    
-    // Show preview message if more records exist
-    if (requirement.preview) {
-        const previewRow = document.createElement('tr');
-        previewRow.innerHTML = `
-            <td colspan="${columns.length}" class="text-center text-muted py-3">
-                Showing 100 of ${requirement.total} records. Download Excel file to see all records.
-            </td>
-        `;
-        body.appendChild(previewRow);
-    }
+    document.getElementById('comparisonSummary').style.display = 'block';
+}
+
+// ================================
+// SHOW DOWNLOAD PANEL
+// ================================
+
+function showDownloadPanel() {
+    document.getElementById('downloadPanel').style.display = 'block';
 }
 
 // ================================
@@ -394,31 +401,37 @@ function displayRequirementData(requirement, reqId) {
 
 async function downloadResults(requirement) {
     try {
-        const endpoint = requirement === 'report' ? 'report' : requirement;
+        // Determine endpoint and filename
+        let endpoint, filename;
         
-        const response = await fetch(`/api/download/${endpoint}`);
-        
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            
-            // Determine filename
+        if (requirement === 'zip') {
+            endpoint = 'download-zip';
+            filename = 'CCP_AT_Comparison_Results.zip';
+        } else {
+            endpoint = `download/${requirement}`;
             const filenameMap = {
                 'req1': '01_Securities_In_CCP_Not_In_AT.xlsx',
                 'req2': '02_Securities_In_AT_Not_In_CCP.xlsx',
                 'req3': '03_Securities_Config_Mismatch.xlsx',
                 'report': '00_Comparison_Report.xlsx'
             };
-            
-            a.download = filenameMap[requirement] || 'download.xlsx';
+            filename = filenameMap[requirement] || 'download.xlsx';
+        }
+        
+        const response = await fetch(`/api/${endpoint}`);
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
             
-            showAlert('success', `Downloaded: ${a.download}`);
+            showAlert('success', `Downloaded: ${filename}`);
         } else {
             showAlert('error', 'Error downloading file');
         }
@@ -431,9 +444,6 @@ async function downloadResults(requirement) {
 // ================================
 // RESET SESSION
 // ================================
-
-const resetBtn = document.getElementById('resetBtn');
-resetBtn.addEventListener('click', resetSession);
 
 async function resetSession() {
     if (!confirm('Are you sure you want to start over? All uploaded data will be cleared.')) {
@@ -529,10 +539,15 @@ function createFileList(files) {
 // ================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('CCP-AT Comparison Engine GUI loaded successfully');
+    console.log('✓ CCP-AT Comparison Engine GUI loaded successfully');
+    
+    // Initialize all elements and attach listeners
+    initializeElements();
     
     // Ensure step 1 is visible
     document.getElementById('step1').style.display = 'block';
     document.getElementById('step2').style.display = 'none';
     document.getElementById('step3').style.display = 'none';
+    
+    console.log('✓ All event listeners attached');
 });

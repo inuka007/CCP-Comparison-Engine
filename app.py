@@ -7,7 +7,8 @@ import os
 import sys
 import logging
 import io
-from pathlib import Path
+import uuid
+import zipfile
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file, session
 from werkzeug.utils import secure_filename
@@ -22,12 +23,18 @@ from compare_engine import ComparisonEngine, ValidationError
 app = Flask(__name__)
 app.secret_key = 'ccp_at_comparison_secret_key_2025'
 
+# In-memory cache for comparison results (keyed by session ID)
+RESULTS_CACHE = {}
+
 # File upload configuration
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'temp_uploads')
+RESULTS_FOLDER = os.path.join(os.path.dirname(__file__), 'temp_results')
+MAPPING_FILE = os.path.join(os.path.dirname(__file__), 'Column_Mapping.xlsx')
 ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB max file size
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(RESULTS_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_FILE_SIZE
 
@@ -162,8 +169,7 @@ def validate_uploaded_files(file_paths):
     required_files = {
         'CCP_Security_Whitelist.xlsx': ['symbol', 'exchange'],
         'CCP_Market_Rules.xlsx': ['exchange'],
-        'AT_Whitelist.xlsx': ['symbol', 'exchange'],
-        'Column_Mapping.xlsx': ['ccp_column', 'at_column']
+        'AT_Whitelist.xlsx': ['symbol', 'exchange']
     }
     
     uploaded_filenames = {os.path.basename(p).lower(): p for p in file_paths.values()}
@@ -243,6 +249,19 @@ def validate_uploaded_files(file_paths):
             }
             logger.warning(f"Required file not found: {required_file}")
     
+    # Check if Column_Mapping.xlsx exists on backend
+    if not os.path.isfile(MAPPING_FILE):
+        validation_results['warnings'].append(
+            "Column_Mapping.xlsx not found on server. Using default mapping behavior."
+        )
+        logger.warning("Column_Mapping.xlsx not found on server")
+    else:
+        validation_results['files_status']['Column_Mapping.xlsx'] = {
+            'status': 'valid',
+            'source': 'server'
+        }
+        logger.info("Column_Mapping.xlsx loaded from server")
+    
     return validation_results
 
 # ================================
@@ -265,17 +284,25 @@ def run_comparison():
         
         uploaded_files = session['uploaded_files']
         
+        # Add Column_Mapping.xlsx from backend if it exists
+        if os.path.isfile(MAPPING_FILE):
+            uploaded_files['Column_Mapping.xlsx'] = MAPPING_FILE
+        
         # Initialize comparison engine
         engine = ComparisonEngine(uploaded_files)
         
         # Run comparison
         results = engine.compare()
         
-        # Store results in session for download
-        session['comparison_results'] = {
-            'requirement_1': results['requirement_1'].to_dict('records'),
-            'requirement_2': results['requirement_2'].to_dict('records'),
-            'requirement_3': results['requirement_3'].to_dict('records'),
+        # Create a unique results ID for this session
+        results_id = str(uuid.uuid4())
+        session['results_id'] = results_id
+        
+        # Store results in memory cache (not in session to avoid serialization issues)
+        RESULTS_CACHE[results_id] = {
+            'requirement_1': results['requirement_1'],
+            'requirement_2': results['requirement_2'],
+            'requirement_3': results['requirement_3'],
             'statistics': results['statistics'],
             'timestamp': datetime.now().isoformat()
         }
@@ -285,7 +312,8 @@ def run_comparison():
         return jsonify({
             'success': True,
             'message': 'Comparison completed successfully',
-            'statistics': results['statistics'],
+            'statistics': {k: (int(v) if isinstance(v, (int, float)) else str(v)) 
+                          for k, v in results['statistics'].items()},
             'summary': {
                 'requirement_1_count': len(results['requirement_1']),
                 'requirement_2_count': len(results['requirement_2']),
@@ -303,6 +331,7 @@ def run_comparison():
     
     except Exception as e:
         logger.error(f"Error during comparison: {str(e)}")
+        logger.error(f"Traceback: {repr(e)}")
         return jsonify({
             'success': False,
             'error': f'Error during comparison: {str(e)}',
@@ -317,33 +346,56 @@ def run_comparison():
 def get_results():
     """Get comparison results for display in frontend"""
     try:
-        if 'comparison_results' not in session:
+        if 'results_id' not in session or session['results_id'] not in RESULTS_CACHE:
             return jsonify({
                 'success': False,
                 'error': 'No results available. Please run comparison first.',
                 'type': 'no_results'
             }), 400
         
-        results = session['comparison_results']
+        results = RESULTS_CACHE[session['results_id']]
+        
+        # Clean dataframes for JSON serialization
+        def clean_value(val):
+            """Convert pandas/numpy types to JSON-safe Python types"""
+            if pd.isna(val):
+                return None
+            if isinstance(val, (pd.Timestamp, np.datetime64)):
+                return str(val)
+            if isinstance(val, (np.integer, np.floating)):
+                return float(val) if isinstance(val, np.floating) else int(val)
+            return str(val) if val is not None else None
+        
+        def clean_dataframe_for_json(df):
+            """Clean dataframe for JSON serialization"""
+            df_copy = df.fillna('')
+            for col in df_copy.columns:
+                df_copy[col] = df_copy[col].apply(clean_value)
+            return df_copy.to_dict('records')
+        
+        req1_data = clean_dataframe_for_json(results['requirement_1'])
+        req2_data = clean_dataframe_for_json(results['requirement_2'])
+        req3_data = clean_dataframe_for_json(results['requirement_3'])
         
         # Return limited preview (first 100 rows per requirement)
         return jsonify({
             'success': True,
-            'statistics': results['statistics'],
+            'statistics': {k: (int(v) if isinstance(v, (int, float)) else str(v)) 
+                          for k, v in results['statistics'].items()},
             'requirement_1': {
-                'data': results['requirement_1'][:100],
-                'total': len(results['requirement_1']),
-                'preview': True if len(results['requirement_1']) > 100 else False
+                'data': req1_data[:100],
+                'total': len(req1_data),
+                'preview': True if len(req1_data) > 100 else False
             },
             'requirement_2': {
-                'data': results['requirement_2'][:100],
-                'total': len(results['requirement_2']),
-                'preview': True if len(results['requirement_2']) > 100 else False
+                'data': req2_data[:100],
+                'total': len(req2_data),
+                'preview': True if len(req2_data) > 100 else False
             },
             'requirement_3': {
-                'data': results['requirement_3'][:100],
-                'total': len(results['requirement_3']),
-                'preview': True if len(results['requirement_3']) > 100 else False
+                'data': req3_data[:100],
+                'total': len(req3_data),
+                'preview': True if len(req3_data) > 100 else False
             }
         }), 200
     
@@ -363,14 +415,14 @@ def get_results():
 def download_results(requirement):
     """Download specific requirement results as Excel file"""
     try:
-        if 'comparison_results' not in session:
+        if 'results_id' not in session or session['results_id'] not in RESULTS_CACHE:
             return jsonify({
                 'success': False,
                 'error': 'No results available. Please run comparison first.',
                 'type': 'no_results'
             }), 400
         
-        results = session['comparison_results']
+        results = RESULTS_CACHE[session['results_id']]
         
         # Map requirement parameter to data
         requirement_map = {
@@ -431,26 +483,87 @@ def download_results(requirement):
             }
             df = pd.DataFrame(report_data)
         else:
-            df = pd.DataFrame(results[req_key])
+            df = results[req_key]
         
         # Create Excel file in memory
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='Results', index=False)
-            
-            # Auto-adjust column widths
-            worksheet = writer.sheets['Results']
-            for column in worksheet.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = (max_length + 2)
-                worksheet.column_dimensions[column_letter].width = adjusted_width
+            # For Requirement 3, write AT and CCP sheets + a Diffs summary
+            if req_key == 'requirement_3':
+                # df contains combined rows with at_ and ccp_ prefixed columns
+                # Write AT sheet
+                at_cols = [c for c in df.columns if c.startswith('at_')]
+                if at_cols:
+                    df_at = df[at_cols].copy()
+                    # remove prefix for readability
+                    df_at.columns = [c.replace('at_', '') for c in df_at.columns]
+                    df_at.to_excel(writer, sheet_name='AT', index=False)
+
+                    # Auto-adjust AT widths
+                    ws_at = writer.sheets['AT']
+                    for column in ws_at.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_at.column_dimensions[column_letter].width = max_length + 2
+
+                # Write CCP sheet
+                ccp_cols = [c for c in df.columns if c.startswith('ccp_')]
+                if ccp_cols:
+                    df_ccp = df[ccp_cols].copy()
+                    df_ccp.columns = [c.replace('ccp_', '') for c in df_ccp.columns]
+                    df_ccp.to_excel(writer, sheet_name='CCP', index=False)
+
+                    # Auto-adjust CCP widths
+                    ws_ccp = writer.sheets['CCP']
+                    for column in ws_ccp.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_ccp.column_dimensions[column_letter].width = max_length + 2
+
+                # Write Diffs summary sheet
+                diff_cols = [c for c in df.columns if c not in at_cols + ccp_cols]
+                if diff_cols:
+                    df_diffs = df[diff_cols].copy()
+                    df_diffs.to_excel(writer, sheet_name='Diffs', index=False)
+
+                    ws_d = writer.sheets['Diffs']
+                    for column in ws_d.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_d.column_dimensions[column_letter].width = max_length + 2
+            else:
+                df.to_excel(writer, sheet_name='Results', index=False)
+                # Auto-adjust column widths for Results
+                worksheet = writer.sheets['Results']
+                for column in worksheet.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = (max_length + 2)
+                    worksheet.column_dimensions[column_letter].width = adjusted_width
         
         output.seek(0)
         
@@ -469,6 +582,150 @@ def download_results(requirement):
             'success': False,
             'error': f'Error downloading results: {str(e)}',
             'type': 'download_error'
+        }), 500
+
+# ================================
+# ROUTES - ZIP DOWNLOAD
+# ================================
+
+@app.route('/api/download-zip', methods=['GET'])
+def download_zip():
+    """Download all results as a ZIP bundle"""
+    try:
+        if 'results_id' not in session or session['results_id'] not in RESULTS_CACHE:
+            return jsonify({
+                'success': False,
+                'error': 'No results available. Please run comparison first.',
+                'type': 'no_results'
+            }), 400
+        
+        results = RESULTS_CACHE[session['results_id']]
+        
+        # Create ZIP file in memory
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            # Define all files to include
+            files_to_zip = [
+                ('requirement_1', 'requirement_1', '01_Securities_In_CCP_Not_In_AT.xlsx'),
+                ('requirement_2', 'requirement_2', '02_Securities_In_AT_Not_In_CCP.xlsx'),
+                ('requirement_3', 'requirement_3', '03_Securities_Config_Mismatch.xlsx'),
+                ('report', 'report', '00_Comparison_Report.xlsx')
+            ]
+            
+            for file_type, cache_key, filename in files_to_zip:
+                # Generate individual file
+                output = io.BytesIO()
+                
+                if cache_key == 'report':
+                    # Generate summary report
+                    report_data = {
+                        "Metric": [
+                            "Total CCP Records (Merged)",
+                            "Total AT Records",
+                            "Records in Both (No Action Required)",
+                            "",
+                            "REQUIREMENT 1: Securities in CCP but NOT in AT",
+                            "  → Action: ADD to AT Asia Whitelist",
+                            "",
+                            "REQUIREMENT 2: Securities in AT but NOT in CCP",
+                            "  → Action: REVIEW activity/positions - DELETE or ADD to Exception List",
+                            "",
+                            "REQUIREMENT 3: Securities in BOTH with Config Mismatch",
+                            "  → Action: UPDATE AT to match CCP & Setup Market Exception rule",
+                            "",
+                            "TOTAL Records Requiring Action",
+                            "",
+                            "Report Generated"
+                        ],
+                        "Count/Value": [
+                            results['statistics'].get('total_ccp', 0),
+                            results['statistics'].get('total_at', 0),
+                            results['statistics'].get('total_common', 0),
+                            "",
+                            len(results['requirement_1']),
+                            f"{len(results['requirement_1'])} records",
+                            "",
+                            len(results['requirement_2']),
+                            f"{len(results['requirement_2'])} records",
+                            "",
+                            len(results['requirement_3']),
+                            f"{len(results['requirement_3'])} records",
+                            "",
+                            len(results['requirement_1']) + len(results['requirement_2']) + len(results['requirement_3']),
+                            "",
+                            results['timestamp']
+                        ]
+                    }
+                    df = pd.DataFrame(report_data)
+                else:
+                    df = results[cache_key]
+                
+                # Write to BytesIO
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    if cache_key == 'requirement_3':
+                        # Write AT sheet
+                        at_cols = [c for c in df.columns if c.startswith('at_')]
+                        if at_cols:
+                            df_at = df[at_cols].copy()
+                            df_at.columns = [c.replace('at_', '') for c in df_at.columns]
+                            df_at.to_excel(writer, sheet_name='AT', index=False)
+                        
+                        # Write CCP sheet
+                        ccp_cols = [c for c in df.columns if c.startswith('ccp_')]
+                        if ccp_cols:
+                            df_ccp = df[ccp_cols].copy()
+                            df_ccp.columns = [c.replace('ccp_', '') for c in df_ccp.columns]
+                            df_ccp.to_excel(writer, sheet_name='CCP', index=False)
+                        
+                        # Write Diffs sheet
+                        diff_cols = [c for c in df.columns if c not in at_cols + ccp_cols]
+                        if diff_cols:
+                            df_diffs = df[diff_cols].copy()
+                            df_diffs.to_excel(writer, sheet_name='Diffs', index=False)
+                    else:
+                        df.to_excel(writer, sheet_name='Results', index=False)
+                
+                # Add file to ZIP
+                output.seek(0)
+                zip_file.writestr(filename, output.getvalue())
+            
+            # Add a README file
+            readme_content = """CCP-AT Comparison Engine - Results Bundle
+=============================================
+
+This ZIP file contains all comparison results:
+
+Files included:
+- 00_Comparison_Report.xlsx: Summary report with overall statistics
+- 01_Securities_In_CCP_Not_In_AT.xlsx: Securities that exist in CCP but not in AT
+- 02_Securities_In_AT_Not_In_CCP.xlsx: Securities that exist in AT but not in CCP
+- 03_Securities_Config_Mismatch.xlsx: Securities in both with configuration mismatches
+  - AT Sheet: AT configuration values
+  - CCP Sheet: CCP configuration values
+  - Diffs Sheet: Summary of differences
+
+Generated: {timestamp}
+""".format(timestamp=results['timestamp'])
+            
+            zip_file.writestr('README.txt', readme_content)
+        
+        zip_buffer.seek(0)
+        logger.info("Downloaded comparison results as ZIP bundle")
+        
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='CCP_AT_Comparison_Results.zip'
+        )
+    
+    except Exception as e:
+        logger.error(f"Error creating ZIP file: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error creating ZIP file: {str(e)}',
+            'type': 'zip_error'
         }), 500
 
 # ================================

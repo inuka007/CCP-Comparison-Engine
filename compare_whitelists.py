@@ -1,3 +1,9 @@
+"""
+CCP-AT Comparison Engine - Legacy CLI Version
+Original command-line interface for comparing CCP and AT whitelists
+NOTE: For web-based GUI, use app.py instead. This file is kept for reference and command-line usage.
+"""
+
 import pandas as pd
 import numpy as np
 from datetime import datetime

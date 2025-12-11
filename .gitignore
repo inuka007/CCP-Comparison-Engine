@@ -44,3 +44,12 @@ output_results/*.xlsx
 
 # Logs
 *.log
+
+# Temporary upload and result files
+temp_uploads/*.xlsx
+temp_uploads/*.xls
+temp_results/*.xlsx
+temp_results/*.xls
+!temp_uploads/.gitkeep
+!temp_results/.gitkeep
+
