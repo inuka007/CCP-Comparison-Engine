@@ -261,8 +261,7 @@ function updateChecklist(filename, valid) {
     const checkboxMap = {
         'CCP_Security_Whitelist.xlsx': 'check1',
         'CCP_Market_Rules.xlsx': 'check2',
-        'AT_Whitelist.xlsx': 'check3',
-        'Column_Mapping.xlsx': 'check4'
+        'AT_Whitelist.xlsx': 'check3'
     };
     
     if (checkboxMap[filename]) {
@@ -486,7 +485,6 @@ async function resetSession() {
             document.getElementById('check1').checked = false;
             document.getElementById('check2').checked = false;
             document.getElementById('check3').checked = false;
-            document.getElementById('check4').checked = false;
             
             showAlert('success', 'Session reset. Ready for new upload.');
             

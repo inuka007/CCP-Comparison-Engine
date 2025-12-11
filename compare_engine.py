@@ -11,6 +11,14 @@ import logging
 import difflib
 import re
 
+# Import column mappings from hardcoded configuration
+from column_mappings import (
+    get_mapped_columns,
+    get_excluded_columns,
+    should_compare_column,
+    COLUMN_MAPPINGS
+)
+
 logger = logging.getLogger(__name__)
 
 # ================================
@@ -121,12 +129,12 @@ class ComparisonEngine:
                     self.ccp_rules = pd.read_excel(filepath)
                 elif 'AT_Whitelist' in filename:
                     self.at = pd.read_excel(filepath)
-                elif 'Column_Mapping' in filename:
-                    self.mapping = pd.read_excel(filepath)
             
-            # Validate all files loaded
-            if self.ccp_sec is None or self.ccp_rules is None or self.at is None or self.mapping is None:
+            # Validate required files loaded
+            if self.ccp_sec is None or self.ccp_rules is None or self.at is None:
                 raise ValidationError("Not all required files were found or loaded")
+            
+            logger.info("Files loaded successfully")
         
         except Exception as e:
             logger.error(f"Error loading files: {str(e)}")
@@ -138,7 +146,7 @@ class ComparisonEngine:
     
     def _normalize_columns(self):
         """Normalize column names across all dataframes"""
-        for df in [self.ccp_sec, self.ccp_rules, self.at, self.mapping]:
+        for df in [self.ccp_sec, self.ccp_rules, self.at]:
             if df is not None:
                 df.columns = (
                     df.columns.astype(str)
@@ -157,15 +165,13 @@ class ComparisonEngine:
         required = {
             'ccp_sec': ['exchange'],
             'ccp_rules': ['exchange'],
-            'at': ['exchange'],
-            'mapping': ['ccp_column', 'at_column']
+            'at': ['exchange']
         }
         
         dfs = {
             'ccp_sec': self.ccp_sec,
             'ccp_rules': self.ccp_rules,
-            'at': self.at,
-            'mapping': self.mapping
+            'at': self.at
         }
         
         for name, required_cols in required.items():
@@ -220,30 +226,17 @@ class ComparisonEngine:
     # ================================
     
     def _prepare_mapping(self):
-        """Clean and prepare mapping file"""
-        self.mapping = self.mapping.dropna(how="all")
-        self.mapping = self.mapping.fillna("")
-        # Normalize mapping entries using same rules as dataframe column normalization
-        def normalize_name(s: str) -> str:
-            if s is None:
-                return ""
-            s = str(s)
-            # remove parenthetical notes
-            s = re.sub(r"\(.*?\)", "", s)
-            # replace common separators with space
-            s = s.replace('\r', ' ').replace('\n', ' ').replace('/', ' ').replace('-', ' ')
-            # remove non-alphanumeric except spaces
-            s = re.sub(r"[^0-9a-zA-Z ]+", "", s)
-            # collapse spaces and lowercase
-            s = re.sub(r"\s+", " ", s).strip().lower()
-            return s
-
-        import re
-        self.mapping["ccp_column_raw"] = self.mapping["ccp_column"].astype(str)
-        self.mapping["at_column_raw"] = self.mapping["at_column"].astype(str)
-
-        self.mapping["ccp_column_norm"] = self.mapping["ccp_column_raw"].apply(lambda v: normalize_name(v))
-        self.mapping["at_column_norm"] = self.mapping["at_column_raw"].apply(lambda v: normalize_name(v))
+        """Prepare mapping - now using hardcoded mappings from column_mappings.py"""
+        logger.info("Using hardcoded column mappings from column_mappings.py")
+        
+        # Use hardcoded mappings instead of reading from file
+        # This ensures consistent column matching across all runs
+        self.effective_mappings = get_mapped_columns()
+        
+        if not self.effective_mappings:
+            logger.warning("No column mappings defined in column_mappings.py. Will auto-detect common columns.")
+        else:
+            logger.info(f"Loaded {len(self.effective_mappings)} column mappings")
     
     # ================================
     # STEP 7: CREATE COMPOSITE KEYS
@@ -297,88 +290,67 @@ class ComparisonEngine:
     # ================================
     
     def _align_ccp_structure(self):
-        """Align CCP columns to AT structure"""
+        """Align CCP columns to AT structure using hardcoded mappings"""
         aligned_ccp = pd.DataFrame()
         aligned_ccp[self.at_symbol_col] = self.ccp_combined[self.ccp_symbol_col]
         aligned_ccp["exchange"] = self.ccp_combined["exchange"]
         aligned_ccp["composite_key"] = self.ccp_combined["composite_key"]
         
-        # Map columns according to mapping file
-        # Build normalized lookup maps for available dataframe columns
-        def canonical(col_name: str) -> str:
-            if col_name is None:
-                return ""
-            # normalize similar to mapping normalization
-            s = str(col_name)
-            s = re.sub(r"\(.*?\)", "", s)
-            s = s.replace('\r', ' ').replace('\n', ' ').replace('/', ' ').replace('-', ' ')
-            s = re.sub(r"[^0-9a-zA-Z ]+", "", s)
-            s = re.sub(r"\s+", " ", s).strip().lower()
-            return s
-
-        ccp_candidates = {canonical(c): c for c in self.ccp_combined.columns}
-        at_candidates = {canonical(c): c for c in self.at.columns}
-
-        # Helper to find best match in normalized candidate keys
-        def find_best_norm(norm_name, candidates_map, cutoff=0.6):
-            if not norm_name:
-                return None
-            if norm_name in candidates_map:
-                return candidates_map[norm_name]
-            try:
-                matches = difflib.get_close_matches(norm_name, list(candidates_map.keys()), n=1, cutoff=cutoff)
-                return candidates_map[matches[0]] if matches else None
-            except Exception:
-                return None
-
+        # Use hardcoded mappings from column_mappings.py
+        mapped_cols = COLUMN_MAPPINGS
+        
         # Reset effective mappings list
         self.effective_mappings = []
 
-        for _, row in self.mapping.iterrows():
-            raw_ccp = row.get("ccp_column_raw", "")
-            raw_at = row.get("at_column_raw", "")
-            norm_ccp = row.get("ccp_column_norm", "")
-            norm_at = row.get("at_column_norm", "")
-
-            # Attempt to resolve normalized names to actual dataframe columns
-            resolved_ccp = find_best_norm(norm_ccp, ccp_candidates)
-            resolved_at = find_best_norm(norm_at, at_candidates) if norm_at else ""
-
-            if resolved_ccp is None and norm_ccp:
-                logger.debug(f"Mapping: could not resolve CCP '{raw_ccp}' (norm='{norm_ccp}') to available columns")
-            if norm_at and not resolved_at:
-                logger.debug(f"Mapping: could not resolve AT '{raw_at}' (norm='{norm_at}') to available columns")
-            
+        for ccp_col_original, at_col_original in mapped_cols.items():
             # Skip CCP-only fields (empty AT column)
-            # Use resolved names
-            ccp_col = resolved_ccp if resolved_ccp is not None else raw_ccp
-            at_col = resolved_at if resolved_at is not None else (raw_at if raw_at else "")
-
-            if not at_col:
-                if ccp_col in self.ccp_combined.columns:
-                    aligned_ccp[f"ccp_only_{ccp_col}"] = self.ccp_combined[ccp_col]
-                else:
-                    logger.debug(f"CCP-only mapping specified but CCP column '{ccp_col}' not found")
-                # still record mapping for traceability (ccp -> '')
-                self.effective_mappings.append((ccp_col, ""))
+            if not at_col_original or at_col_original == "":
+                if ccp_col_original in self.ccp_combined.columns:
+                    aligned_ccp[f"ccp_only_{ccp_col_original}"] = self.ccp_combined[ccp_col_original]
+                self.effective_mappings.append((ccp_col_original, ""))
                 continue
 
-            # Normal mapping: prefer ccp_col if present, otherwise try to use mapped at_col if that exists in ccp_combined
-            if ccp_col in self.ccp_combined.columns:
-                aligned_ccp[at_col] = self.ccp_combined[ccp_col]
-            elif at_col in self.ccp_combined.columns:
-                aligned_ccp[at_col] = self.ccp_combined[at_col]
+            # Normal mapping: use the CCP column if it exists
+            if ccp_col_original in self.ccp_combined.columns:
+                aligned_ccp[at_col_original] = self.ccp_combined[ccp_col_original]
+            elif at_col_original in self.ccp_combined.columns:
+                aligned_ccp[at_col_original] = self.ccp_combined[at_col_original]
             else:
-                aligned_ccp[at_col] = np.nan
+                aligned_ccp[at_col_original] = np.nan
 
-            # record the effective mapping (resolved CCP column name, AT column name)
-            self.effective_mappings.append((ccp_col, at_col))
+            # record the effective mapping
+            self.effective_mappings.append((ccp_col_original, at_col_original))
         
         self.ccp_combined = aligned_ccp
     
     # ================================
     # STEP 9: RUN REQUIREMENTS
     # ================================
+    
+    def _normalize_boolean_value(self, val):
+        """Normalize boolean-like values: YES/NO, TRUE/FALSE"""
+        if pd.isna(val):
+            return None
+        val_str = str(val).strip().lower()
+        if val_str in ['yes', 'true', '1']:
+            return 'TRUE'
+        elif val_str in ['no', 'false', '0']:
+            return 'FALSE'
+        return str(val).strip()
+    
+    def _values_match(self, ccp_val, at_val):
+        """Compare two values considering boolean equivalences"""
+        if pd.isna(ccp_val) and pd.isna(at_val):
+            return True
+        if pd.isna(ccp_val) or pd.isna(at_val):
+            return False
+        
+        # Normalize both values
+        ccp_norm = self._normalize_boolean_value(ccp_val)
+        at_norm = self._normalize_boolean_value(at_val)
+        
+        # Compare normalized values
+        return str(ccp_norm).lower() == str(at_norm).lower()
     
     def _run_requirements(self):
         """Run all three requirements"""
@@ -397,15 +369,16 @@ class ComparisonEngine:
         requirement_2["action"] = "REVIEW: Check activity/positions - DELETE or ADD to Exception List"
         requirement_2 = requirement_2.drop(columns=["composite_key"])
         
+        # Columns to exclude from comparison (from column_mappings.py)
+        at_exclude_cols = get_excluded_columns()
+        at_exclude_cols.update({self.at_symbol_col, 'exchange', 'composite_key'})
+        
         # Requirement 3: Config mismatches
         common_keys = ccp_keys & at_keys
         requirement_3_list = []
         
-        # Use effective resolved mappings if available (resolved to actual dataframe column names)
-        if hasattr(self, 'effective_mappings') and len(self.effective_mappings) > 0:
-            mapped_cols = self.effective_mappings
-        else:
-            mapped_cols = self.mapping[self.mapping["at_column"] != ""][['ccp_column', 'at_column']].values
+        # Use hardcoded mappings from column_mappings.py
+        mapped_cols = get_mapped_columns()
         
         ccp_by_key = {key: self.ccp_combined[self.ccp_combined["composite_key"] == key].iloc[0] for key in common_keys}
         at_by_key = {key: self.at[self.at["composite_key"] == key].iloc[0] for key in common_keys}
@@ -414,25 +387,41 @@ class ComparisonEngine:
             ccp_row = ccp_by_key[key]
             at_row = at_by_key[key]
 
-            mismatches = []
+            mismatched_field_names = []  # Track only column names with mismatches
 
-            # If the mapping file has mappings, use them; otherwise derive common columns
-            if len(mapped_cols) == 0:
-                # derive columns to compare: intersection of at and ccp columns excluding keys
-                compare_cols = [col for col in at_row.index if col not in (self.at_symbol_col, 'exchange', 'composite_key')]
-                derived_mapped = [(col, col) for col in compare_cols if col in ccp_row.index]
-                cols_to_compare = derived_mapped
+            # Build the list of columns to compare based on hardcoded mappings
+            # Only compare columns that exist in AT (i.e., have an AT equivalent in the mapping)
+            cols_to_compare = []
+            
+            if mapped_cols:
+                # Use hardcoded mapped columns - only those with AT equivalents
+                for ccp_col, at_col in mapped_cols:
+                    # Skip if AT column is empty (CCP-only field)
+                    if not at_col or at_col == "":
+                        continue
+                    # Skip excluded AT columns
+                    if at_col.lower() in at_exclude_cols:
+                        continue
+                    cols_to_compare.append((ccp_col, at_col))
             else:
-                cols_to_compare = mapped_cols
+                # Fallback: If no hardcoded mappings, compare columns that exist in both AT and CCP
+                logger.warning("No column mappings found in column_mappings.py. Using auto-detection.")
+                base_cols = {self.at_symbol_col, 'exchange', 'composite_key'}
+                at_compare_cols = [col for col in at_row.index 
+                                  if col.lower() not in at_exclude_cols and col not in base_cols]
+                ccp_compare_cols = [col for col in ccp_row.index 
+                                   if col.lower() not in at_exclude_cols and col not in base_cols]
+                
+                # Only pairs that exist in both
+                common_cols = [col for col in at_compare_cols if col in ccp_compare_cols]
+                cols_to_compare = [(col, col) for col in common_cols]
 
+            # Now compare the columns
             for ccp_col, at_col in cols_to_compare:
                 # Determine AT value
                 at_val = at_row[at_col] if at_col in at_row.index else np.nan
 
-                # Determine CCP value from aligned CCP row:
-                # - If alignment mapped CCP column into the AT column name, use that: ccp_row[at_col]
-                # - Else if the original CCP-only field was preserved as 'ccp_only_{ccp_col}', use that
-                # - Otherwise treat as missing
+                # Determine CCP value from aligned CCP row
                 if at_col in ccp_row.index:
                     ccp_val = ccp_row[at_col]
                 elif f"ccp_only_{ccp_col}" in ccp_row.index:
@@ -440,20 +429,11 @@ class ComparisonEngine:
                 else:
                     ccp_val = np.nan
 
-                if pd.isna(ccp_val) and pd.isna(at_val):
-                    continue
-                elif pd.isna(ccp_val) or pd.isna(at_val):
-                    mismatches.append(f"{at_col} (CCP: {ccp_val}, AT: {at_val})")
-                else:
-                    # Compare as strings case-insensitive for robust matching
-                    try:
-                        if str(ccp_val).strip().lower() != str(at_val).strip().lower():
-                            mismatches.append(f"{at_col} (CCP: {ccp_val}, AT: {at_val})")
-                    except Exception:
-                        if ccp_val != at_val:
-                            mismatches.append(f"{at_col} (CCP: {ccp_val}, AT: {at_val})")
+                # Check if values match (considering boolean equivalences)
+                if not self._values_match(ccp_val, at_val):
+                    mismatched_field_names.append(at_col)
 
-            if mismatches:
+            if mismatched_field_names:
                 # Build a combined record containing AT and CCP columns prefixed for side-by-side review
                 combined = {}
                 # add symbol and exchange explicitly
@@ -472,7 +452,8 @@ class ComparisonEngine:
                         continue
                     combined[f"ccp_{col}"] = ccp_row[col]
 
-                combined['mismatched_fields'] = "; ".join(mismatches)
+                # Only include the mismatched field column names
+                combined['mismatched_fields'] = ", ".join(mismatched_field_names)
                 combined['action'] = "UPDATE AT to match CCP and SETUP Market Exception rule in CCP"
 
                 requirement_3_list.append(combined)

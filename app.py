@@ -29,7 +29,6 @@ RESULTS_CACHE = {}
 # File upload configuration
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'temp_uploads')
 RESULTS_FOLDER = os.path.join(os.path.dirname(__file__), 'temp_results')
-MAPPING_FILE = os.path.join(os.path.dirname(__file__), 'Column_Mapping.xlsx')
 ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB max file size
 
@@ -249,18 +248,9 @@ def validate_uploaded_files(file_paths):
             }
             logger.warning(f"Required file not found: {required_file}")
     
-    # Check if Column_Mapping.xlsx exists on backend
-    if not os.path.isfile(MAPPING_FILE):
-        validation_results['warnings'].append(
-            "Column_Mapping.xlsx not found on server. Using default mapping behavior."
-        )
-        logger.warning("Column_Mapping.xlsx not found on server")
-    else:
-        validation_results['files_status']['Column_Mapping.xlsx'] = {
-            'status': 'valid',
-            'source': 'server'
-        }
-        logger.info("Column_Mapping.xlsx loaded from server")
+
+    
+
     
     return validation_results
 
@@ -283,10 +273,6 @@ def run_comparison():
             }), 400
         
         uploaded_files = session['uploaded_files']
-        
-        # Add Column_Mapping.xlsx from backend if it exists
-        if os.path.isfile(MAPPING_FILE):
-            uploaded_files['Column_Mapping.xlsx'] = MAPPING_FILE
         
         # Initialize comparison engine
         engine = ComparisonEngine(uploaded_files)
@@ -493,10 +479,12 @@ def download_results(requirement):
                 # df contains combined rows with at_ and ccp_ prefixed columns
                 # Write AT sheet
                 at_cols = [c for c in df.columns if c.startswith('at_')]
-                if at_cols:
-                    df_at = df[at_cols].copy()
+                base_cols = [c for c in df.columns if c in ['symbol', 'exchange']]  # Include symbol and exchange
+                
+                if at_cols or base_cols:
+                    df_at = df[base_cols + at_cols].copy()
                     # remove prefix for readability
-                    df_at.columns = [c.replace('at_', '') for c in df_at.columns]
+                    df_at.columns = [c.replace('at_', '') if c.startswith('at_') else c for c in df_at.columns]
                     df_at.to_excel(writer, sheet_name='AT', index=False)
 
                     # Auto-adjust AT widths
@@ -514,9 +502,9 @@ def download_results(requirement):
 
                 # Write CCP sheet
                 ccp_cols = [c for c in df.columns if c.startswith('ccp_')]
-                if ccp_cols:
-                    df_ccp = df[ccp_cols].copy()
-                    df_ccp.columns = [c.replace('ccp_', '') for c in df_ccp.columns]
+                if base_cols or ccp_cols:
+                    df_ccp = df[base_cols + ccp_cols].copy()
+                    df_ccp.columns = [c.replace('ccp_', '') if c.startswith('ccp_') else c for c in df_ccp.columns]
                     df_ccp.to_excel(writer, sheet_name='CCP', index=False)
 
                     # Auto-adjust CCP widths
@@ -533,9 +521,12 @@ def download_results(requirement):
                         ws_ccp.column_dimensions[column_letter].width = max_length + 2
 
                 # Write Diffs summary sheet
-                diff_cols = [c for c in df.columns if c not in at_cols + ccp_cols]
-                if diff_cols:
-                    df_diffs = df[diff_cols].copy()
+                # Write Diffs summary sheet: only symbol, exchange, mismatched_fields
+                diff_cols = ['symbol', 'exchange', 'mismatched_fields']
+                # Ensure columns exist
+                available = [c for c in diff_cols if c in df.columns]
+                if available:
+                    df_diffs = df[available].copy()
                     df_diffs.to_excel(writer, sheet_name='Diffs', index=False)
 
                     ws_d = writer.sheets['Diffs']
@@ -666,22 +657,26 @@ def download_zip():
                     if cache_key == 'requirement_3':
                         # Write AT sheet
                         at_cols = [c for c in df.columns if c.startswith('at_')]
-                        if at_cols:
-                            df_at = df[at_cols].copy()
-                            df_at.columns = [c.replace('at_', '') for c in df_at.columns]
+                        base_cols = [c for c in df.columns if c in ['symbol', 'exchange']]  # Include symbol and exchange
+                        
+                        if at_cols or base_cols:
+                            df_at = df[base_cols + at_cols].copy()
+                            df_at.columns = [c.replace('at_', '') if c.startswith('at_') else c for c in df_at.columns]
                             df_at.to_excel(writer, sheet_name='AT', index=False)
                         
                         # Write CCP sheet
                         ccp_cols = [c for c in df.columns if c.startswith('ccp_')]
-                        if ccp_cols:
-                            df_ccp = df[ccp_cols].copy()
-                            df_ccp.columns = [c.replace('ccp_', '') for c in df_ccp.columns]
+                        if base_cols or ccp_cols:
+                            df_ccp = df[base_cols + ccp_cols].copy()
+                            df_ccp.columns = [c.replace('ccp_', '') if c.startswith('ccp_') else c for c in df_ccp.columns]
                             df_ccp.to_excel(writer, sheet_name='CCP', index=False)
                         
                         # Write Diffs sheet
-                        diff_cols = [c for c in df.columns if c not in at_cols + ccp_cols]
-                        if diff_cols:
-                            df_diffs = df[diff_cols].copy()
+                        # Write Diffs sheet: only symbol, exchange, mismatched_fields
+                        diff_cols = ['symbol', 'exchange', 'mismatched_fields']
+                        available = [c for c in diff_cols if c in df.columns]
+                        if available:
+                            df_diffs = df[available].copy()
                             df_diffs.to_excel(writer, sheet_name='Diffs', index=False)
                     else:
                         df.to_excel(writer, sheet_name='Results', index=False)
