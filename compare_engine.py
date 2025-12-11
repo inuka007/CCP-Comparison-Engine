@@ -1,7 +1,11 @@
 """
 Comparison Engine Module
-Core logic for comparing CCP and AT whitelists
-Refactored from compare_whitelists.py for use in GUI
+Orchestrates the modular architecture for comparing CCP and AT whitelists
+
+Architecture:
+- ccp_combiner.py: Combines CCP Security Whitelist + Market Rules
+- requirements_analyzer.py: Performs 3 requirements analysis
+- column_mappings.py: Defines column mappings and exclusions
 """
 
 import pandas as pd
@@ -11,7 +15,8 @@ import logging
 import difflib
 import re
 
-# Import column mappings from hardcoded configuration
+from ccp_combiner import CCPCombiner
+from requirements_analyzer import RequirementsAnalyzer
 from column_mappings import (
     get_mapped_columns,
     get_excluded_columns,
@@ -208,18 +213,19 @@ class ComparisonEngine:
             raise ValidationError(f"Could not detect symbol column in AT. Available: {list(self.at.columns)}")
     
     # ================================
-    # STEP 5: MERGE CCP DATA
+    # STEP 5: COMBINE CCP DATA (delegated to CCPCombiner)
     # ================================
     
     def _merge_ccp(self):
-        """Merge CCP Security + CCP Market Rules"""
-        self.ccp_combined = pd.merge(
-            self.ccp_sec,
-            self.ccp_rules,
-            on="exchange",
-            how="left",
-            validate="m:1"
-        )
+        """
+        Delegate CCP combining to the CCPCombiner module
+        
+        This keeps CCP-specific logic isolated and testable
+        """
+        combiner = CCPCombiner(self.ccp_sec, self.ccp_rules)
+        combiner.combine()
+        self.ccp_combined = combiner.get_combined()
+        logger.info("CCP combining delegated to CCPCombiner module")
     
     # ================================
     # STEP 6: PREPARE MAPPING
@@ -324,147 +330,29 @@ class ComparisonEngine:
         self.ccp_combined = aligned_ccp
     
     # ================================
-    # STEP 9: RUN REQUIREMENTS
+    # STEP 9: RUN REQUIREMENTS (delegated to RequirementsAnalyzer)
     # ================================
     
-    def _normalize_boolean_value(self, val):
-        """Normalize boolean-like values: YES/NO, TRUE/FALSE"""
-        if pd.isna(val):
-            return None
-        val_str = str(val).strip().lower()
-        if val_str in ['yes', 'true', '1']:
-            return 'TRUE'
-        elif val_str in ['no', 'false', '0']:
-            return 'FALSE'
-        return str(val).strip()
-    
-    def _values_match(self, ccp_val, at_val):
-        """Compare two values considering boolean equivalences"""
-        if pd.isna(ccp_val) and pd.isna(at_val):
-            return True
-        if pd.isna(ccp_val) or pd.isna(at_val):
-            return False
-        
-        # Normalize both values
-        ccp_norm = self._normalize_boolean_value(ccp_val)
-        at_norm = self._normalize_boolean_value(at_val)
-        
-        # Compare normalized values
-        return str(ccp_norm).lower() == str(at_norm).lower()
-    
     def _run_requirements(self):
-        """Run all three requirements"""
-        ccp_keys = set(self.ccp_combined["composite_key"])
-        at_keys = set(self.at["composite_key"])
+        """
+        Delegate requirements analysis to RequirementsAnalyzer module
         
-        # Requirement 1: CCP not in AT
-        req1_keys = ccp_keys - at_keys
-        requirement_1 = self.ccp_combined[self.ccp_combined["composite_key"].isin(req1_keys)].copy()
-        requirement_1["action"] = "ADD to AT Asia Whitelist"
-        requirement_1 = requirement_1.drop(columns=["composite_key"])
+        This keeps requirement logic isolated, testable, and maintainable
+        """
+        analyzer = RequirementsAnalyzer(
+            self.ccp_combined,
+            self.at,
+            self.ccp_symbol_col,
+            self.at_symbol_col
+        )
         
-        # Requirement 2: AT not in CCP
-        req2_keys = at_keys - ccp_keys
-        requirement_2 = self.at[self.at["composite_key"].isin(req2_keys)].copy()
-        requirement_2["action"] = "REVIEW: Check activity/positions - DELETE or ADD to Exception List"
-        requirement_2 = requirement_2.drop(columns=["composite_key"])
+        results = analyzer.analyze()
+        logger.info("Requirements analysis delegated to RequirementsAnalyzer module")
         
-        # Columns to exclude from comparison (from column_mappings.py)
-        at_exclude_cols = get_excluded_columns()
-        at_exclude_cols.update({self.at_symbol_col, 'exchange', 'composite_key'})
-        
-        # Requirement 3: Config mismatches
-        common_keys = ccp_keys & at_keys
-        requirement_3_list = []
-        
-        # Use hardcoded mappings from column_mappings.py
-        mapped_cols = get_mapped_columns()
-        
-        ccp_by_key = {key: self.ccp_combined[self.ccp_combined["composite_key"] == key].iloc[0] for key in common_keys}
-        at_by_key = {key: self.at[self.at["composite_key"] == key].iloc[0] for key in common_keys}
-        
-        for key in common_keys:
-            ccp_row = ccp_by_key[key]
-            at_row = at_by_key[key]
-
-            mismatched_field_names = []  # Track only column names with mismatches
-
-            # Build the list of columns to compare based on hardcoded mappings
-            # Only compare columns that exist in AT (i.e., have an AT equivalent in the mapping)
-            cols_to_compare = []
-            
-            if mapped_cols:
-                # Use hardcoded mapped columns - only those with AT equivalents
-                for ccp_col, at_col in mapped_cols:
-                    # Skip if AT column is empty (CCP-only field)
-                    if not at_col or at_col == "":
-                        continue
-                    # Skip excluded AT columns
-                    if at_col.lower() in at_exclude_cols:
-                        continue
-                    cols_to_compare.append((ccp_col, at_col))
-            else:
-                # Fallback: If no hardcoded mappings, compare columns that exist in both AT and CCP
-                logger.warning("No column mappings found in column_mappings.py. Using auto-detection.")
-                base_cols = {self.at_symbol_col, 'exchange', 'composite_key'}
-                at_compare_cols = [col for col in at_row.index 
-                                  if col.lower() not in at_exclude_cols and col not in base_cols]
-                ccp_compare_cols = [col for col in ccp_row.index 
-                                   if col.lower() not in at_exclude_cols and col not in base_cols]
-                
-                # Only pairs that exist in both
-                common_cols = [col for col in at_compare_cols if col in ccp_compare_cols]
-                cols_to_compare = [(col, col) for col in common_cols]
-
-            # Now compare the columns
-            for ccp_col, at_col in cols_to_compare:
-                # Determine AT value
-                at_val = at_row[at_col] if at_col in at_row.index else np.nan
-
-                # Determine CCP value from aligned CCP row
-                if at_col in ccp_row.index:
-                    ccp_val = ccp_row[at_col]
-                elif f"ccp_only_{ccp_col}" in ccp_row.index:
-                    ccp_val = ccp_row[f"ccp_only_{ccp_col}"]
-                else:
-                    ccp_val = np.nan
-
-                # Check if values match (considering boolean equivalences)
-                if not self._values_match(ccp_val, at_val):
-                    mismatched_field_names.append(at_col)
-
-            if mismatched_field_names:
-                # Build a combined record containing AT and CCP columns prefixed for side-by-side review
-                combined = {}
-                # add symbol and exchange explicitly
-                combined[self.at_symbol_col] = at_row.get(self.at_symbol_col, '')
-                combined['exchange'] = at_row.get('exchange', '')
-
-                # AT-prefixed columns
-                for col in at_row.index:
-                    if col in (self.at_symbol_col, 'exchange', 'composite_key'):
-                        continue
-                    combined[f"at_{col}"] = at_row[col]
-
-                # CCP-prefixed columns (use ccp_combined values which are aligned)
-                for col in ccp_row.index:
-                    if col in (self.at_symbol_col, 'exchange', 'composite_key'):
-                        continue
-                    combined[f"ccp_{col}"] = ccp_row[col]
-
-                # Only include the mismatched field column names
-                combined['mismatched_fields'] = ", ".join(mismatched_field_names)
-                combined['action'] = "UPDATE AT to match CCP and SETUP Market Exception rule in CCP"
-
-                requirement_3_list.append(combined)
-        
-        requirement_3 = pd.DataFrame(requirement_3_list)
-        logger.info(f"Requirement 3 mismatches found: {len(requirement_3)}")
-
         return {
-            'requirement_1': requirement_1,
-            'requirement_2': requirement_2,
-            'requirement_3': requirement_3
+            'requirement_1': results['requirement_1'],
+            'requirement_2': results['requirement_2'],
+            'requirement_3': results['requirement_3']
         }
     
     # ================================
