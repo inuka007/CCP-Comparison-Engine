@@ -127,16 +127,22 @@ class ComparisonEngine:
     def _load_files(self):
         """Load all Excel files"""
         try:
+            logger.info(f"Available uploaded files: {list(self.file_paths.keys())}")
             for filename, filepath in self.file_paths.items():
-                if 'CCP_Security' in filename:
+                fname_lower = filename.lower()
+                if 'ccp_security' in fname_lower or 'ccp_security_whitelist' in fname_lower:
                     self.ccp_sec = pd.read_excel(filepath)
-                elif 'CCP_Market' in filename:
+                    logger.debug(f"Loaded CCP Security from {filename}")
+                elif 'ccp_market' in fname_lower or 'ccp_market_rules' in fname_lower:
                     self.ccp_rules = pd.read_excel(filepath)
-                elif 'AT_Whitelist' in filename:
+                    logger.debug(f"Loaded CCP Market Rules from {filename}")
+                elif 'at_whitelist' in fname_lower or 'at' in fname_lower and 'whitelist' in fname_lower:
                     self.at = pd.read_excel(filepath)
+                    logger.debug(f"Loaded AT whitelist from {filename}")
             
             # Validate required files loaded
             if self.ccp_sec is None or self.ccp_rules is None or self.at is None:
+                logger.error(f"Loaded status - ccp_sec: {self.ccp_sec is not None}, ccp_rules: {self.ccp_rules is not None}, at: {self.at is not None}")
                 raise ValidationError("Not all required files were found or loaded")
             
             logger.info("Files loaded successfully")
