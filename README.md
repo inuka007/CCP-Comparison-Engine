@@ -159,6 +159,44 @@ Each file includes:
 
 ---
 
+## ☁️ Deploy to PythonAnywhere (Free Tier)
+
+Host this app for free on PythonAnywhere suitable for light internal usage.
+
+1. Create a free account at pythonanywhere.com and open a Bash console.
+2. Clone and install dependencies:
+
+```bash
+git clone https://github.com/inuka007/CCP-Comparison-Engine.git
+cd CCP-Comparison-Engine
+pip3.10 install --user -r requirements.txt
+```
+
+3. In the Web tab:
+- Set “Source code” to your repo folder path.
+- Point WSGI to this repo’s `wsgi.py`.
+- Select Python 3.10 (or the version matching your `pip3.10`).
+
+`wsgi.py` content (already included):
+
+```python
+import os
+import sys
+PROJECT_PATH = os.path.dirname(__file__)
+if PROJECT_PATH not in sys.path:
+   sys.path.append(PROJECT_PATH)
+os.environ.setdefault('FLASK_ENV', 'production')
+from app import app as application
+```
+
+4. Reload your app from the Web tab and open the provided subdomain.
+
+Notes:
+- Uploads/results are stored under `temp_uploads/` and `temp_results/` in your project folder.
+- Free tier CPU is limited; keep files modest (UI enforces 50MB per file).
+- If imports fail, verify the Web tab Python version and that dependencies were installed for that interpreter.
+
+
 ## ✨ Key Features
 
 ### Web GUI Features:
