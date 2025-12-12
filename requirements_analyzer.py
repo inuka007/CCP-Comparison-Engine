@@ -152,7 +152,10 @@ class RequirementsAnalyzer:
         """
         Find mismatched fields between CCP and AT rows
         
-        Only compares columns with AT equivalents, excludes audit columns
+        Only compares columns that:
+        1. Have AT equivalents (defined in mappings)
+        2. Actually exist in both rows
+        3. Are not in the exclude list
         """
         mismatched_field_names = []
         
@@ -171,17 +174,22 @@ class RequirementsAnalyzer:
             common = [c for c in at_cols if c in ccp_cols]
             cols_to_compare = [(c, c) for c in common]
         
-        # Compare each column pair
+        # Compare each column pair - only if column actually exists in both rows
         for ccp_col, at_col in cols_to_compare:
-            at_val = at_row[at_col] if at_col in at_row.index else np.nan
+            # Check if AT column exists in AT row
+            if at_col not in at_row.index:
+                continue
             
-            # Get CCP value from aligned row
+            # Check if we can find the CCP value
             if at_col in ccp_row.index:
                 ccp_val = ccp_row[at_col]
-            elif f"ccp_only_{ccp_col}" in ccp_row.index:
-                ccp_val = ccp_row[f"ccp_only_{ccp_col}"]
+            elif ccp_col in ccp_row.index:
+                ccp_val = ccp_row[ccp_col]
             else:
-                ccp_val = np.nan
+                # Column doesn't exist in CCP row, skip comparison
+                continue
+            
+            at_val = at_row[at_col]
             
             # Compare values
             if not self._values_match(ccp_val, at_val):
@@ -191,37 +199,56 @@ class RequirementsAnalyzer:
     
     def _values_match(self, ccp_val, at_val):
         """
-        Compare two values considering boolean equivalences
+        Compare two values with proper type handling
         
-        Treats TRUE/Yes/1 and FALSE/No/0 as equivalent
+        Mappings:
+        - TRUE = YES (case-insensitive)
+        - FALSE = NO (case-insensitive)
+        - Numeric values (including 0, 1, etc.) are compared as exact numeric/string values
+        - NaN/None are treated as equal to each other
         """
-        ccp_norm = self._normalize_boolean_value(ccp_val)
-        at_norm = self._normalize_boolean_value(at_val)
-        return str(ccp_norm).lower() == str(at_norm).lower()
+        # Handle NaN/None cases
+        ccp_is_na = pd.isna(ccp_val)
+        at_is_na = pd.isna(at_val)
+        
+        if ccp_is_na and at_is_na:
+            return True
+        if ccp_is_na or at_is_na:
+            return False
+        
+        # Convert to strings for comparison
+        ccp_str = str(ccp_val).strip().upper()
+        at_str = str(at_val).strip().upper()
+        
+        # Apply boolean text mappings only for explicit text boolean values
+        # TRUE should equal YES, FALSE should equal NO
+        ccp_normalized = self._normalize_boolean_text(ccp_str)
+        at_normalized = self._normalize_boolean_text(at_str)
+        
+        # Compare normalized values
+        return ccp_normalized == at_normalized
     
-    def _normalize_boolean_value(self, val):
+    def _normalize_boolean_text(self, val_str):
         """
-        Normalize boolean-like values to canonical strings
+        Normalize only explicit boolean text values
         
-        Yes/True/1 -> 'TRUE'
-        No/False/0 -> 'FALSE'
-        NA values -> None
+        TRUE -> TRUE
+        YES -> TRUE
+        FALSE -> FALSE
+        NO -> FALSE
+        Everything else (including 0, 1, numeric values) -> returned as-is
         """
-        if pd.isna(val):
-            return None
-        
-        val_str = str(val).strip().upper()
-        
-        # Check for TRUE variants
-        if val_str in ('TRUE', 'YES', '1', 'Y'):
+        if val_str == 'TRUE':
             return 'TRUE'
-        
-        # Check for FALSE variants
-        if val_str in ('FALSE', 'NO', '0', 'N'):
+        elif val_str == 'YES':
+            return 'TRUE'
+        elif val_str == 'FALSE':
             return 'FALSE'
-        
-        # Return as-is for other values
-        return val
+        elif val_str == 'NO':
+            return 'FALSE'
+        else:
+            # Return numeric and other values as-is
+            return val_str
     
     def _build_requirement_3_record(self, ccp_row, at_row, mismatched_fields):
         """
