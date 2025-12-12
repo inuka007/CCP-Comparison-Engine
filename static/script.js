@@ -72,6 +72,26 @@ function attachEventListeners() {
     resetBtn.addEventListener('click', resetSession);
 }
 
+// ================================
+// UI HELPERS
+// ================================
+
+function show(el) { el.style.display = 'block'; }
+function hide(el) { el.style.display = 'none'; }
+
+function setButtonLoading(button, isLoading, text) {
+    if (isLoading) {
+        button.dataset.originalText = button.innerHTML;
+        button.innerHTML = text;
+        button.disabled = true;
+        button.classList.add('processing');
+    } else {
+        button.innerHTML = button.dataset.originalText || button.innerHTML;
+        button.disabled = false;
+        button.classList.remove('processing');
+    }
+}
+
 function clearFiles() {
     appState.uploadedFiles = [];
     document.getElementById('filesList').style.display = 'none';
@@ -144,8 +164,7 @@ async function uploadFiles() {
         return;
     }
     
-    uploadBtn.disabled = true;
-    uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading...';
+    setButtonLoading(uploadBtn, true, '<span class="spinner-border spinner-border-sm me-2"></span>Uploading...');
     
     const formData = new FormData();
     appState.uploadedFiles.forEach(file => {
@@ -183,13 +202,13 @@ async function uploadFiles() {
             appState.currentStep = 2;
         } else {
             showAlert('error', data.error || 'Upload failed');
-            uploadBtn.disabled = false;
+            setButtonLoading(uploadBtn, false);
             uploadBtn.innerHTML = '<i class="bi bi-upload"></i> Upload Files';
         }
     } catch (error) {
         console.error('✗ Error uploading files:', error);
         showAlert('error', 'Error uploading files: ' + error.message);
-        uploadBtn.disabled = false;
+        setButtonLoading(uploadBtn, false);
         uploadBtn.innerHTML = '<i class="bi bi-upload"></i> Upload Files';
     }
 }
@@ -278,11 +297,9 @@ async function runComparison() {
     console.log('✓ Current appState:', appState);
     console.log('✓ Making POST request to /api/compare');
     
-    compareBtn.disabled = true;
-    compareBtn.innerHTML = '<i class="bi bi-hourglass-split"></i> Processing... Please wait (this may take 30-60 seconds)';
-    
+    setButtonLoading(compareBtn, true, '<i class="bi bi-hourglass-split"></i> Processing... Please wait');
     const processingSpinner = document.getElementById('processingSpinner');
-    processingSpinner.style.display = 'block';
+    show(processingSpinner);
     
     try {
         const response = await fetch('/api/compare', {
@@ -310,7 +327,7 @@ async function runComparison() {
             // Move to step 3
             document.getElementById('step2').style.opacity = '0.8';
             document.getElementById('step2').style.pointerEvents = 'none';
-            document.getElementById('step3').style.display = 'block';
+            show(document.getElementById('step3'));
             appState.currentStep = 3;
             
             // Scroll to results
@@ -326,9 +343,9 @@ async function runComparison() {
         console.error('✗ Error details:', error.stack);
         showAlert('error', 'Error running comparison: ' + error.message);
     } finally {
-        compareBtn.disabled = false;
+        setButtonLoading(compareBtn, false);
         compareBtn.innerHTML = '<i class="bi bi-play-circle"></i> Run Comparison';
-        processingSpinner.style.display = 'none';
+        hide(processingSpinner);
     }
 }
 
@@ -464,20 +481,20 @@ async function resetSession() {
             };
             
             // Hide all steps except step 1
-            document.getElementById('step1').style.display = 'block';
+            show(document.getElementById('step1'));
             document.getElementById('step1').style.opacity = '1';
             document.getElementById('step1').style.pointerEvents = 'auto';
-            document.getElementById('step2').style.display = 'none';
+            hide(document.getElementById('step2'));
             document.getElementById('step2').style.opacity = '1';
             document.getElementById('step2').style.pointerEvents = 'auto';
-            document.getElementById('step3').style.display = 'none';
+            hide(document.getElementById('step3'));
             document.getElementById('step3').style.opacity = '1';
             document.getElementById('step3').style.pointerEvents = 'auto';
             
             // Reset file inputs
             fileInput.value = '';
-            document.getElementById('filesList').style.display = 'none';
-            document.getElementById('validationResults').style.display = 'none';
+            hide(document.getElementById('filesList'));
+            hide(document.getElementById('validationResults'));
             uploadBtn.disabled = true;
             clearFilesBtn.style.display = 'none';
             
@@ -543,9 +560,9 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeElements();
     
     // Ensure step 1 is visible
-    document.getElementById('step1').style.display = 'block';
-    document.getElementById('step2').style.display = 'none';
-    document.getElementById('step3').style.display = 'none';
+    show(document.getElementById('step1'));
+    hide(document.getElementById('step2'));
+    hide(document.getElementById('step3'));
     
     console.log('✓ All event listeners attached');
 });
