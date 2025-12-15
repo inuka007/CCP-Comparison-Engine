@@ -42,7 +42,7 @@ class RequirementsAnalyzer:
         Run all three requirements analysis
         
         Returns:
-            dict: Dictionary with requirement_1, requirement_2, requirement_3 dataframes
+            dict: Dictionary with requirement_1, requirement_2, requirement_3, requirement_3_pivot dataframes
         """
         logger.info("Starting requirements analysis...")
         
@@ -60,7 +60,7 @@ class RequirementsAnalyzer:
         
         # Requirement 3: Configuration mismatches
         logger.info("Analyzing Requirement 3: Configuration mismatches...")
-        requirement_3 = self._analyze_requirement_3(ccp_keys, at_keys)
+        requirement_3, requirement_3_pivot = self._analyze_requirement_3(ccp_keys, at_keys)
         
         logger.info("Requirements analysis completed")
         
@@ -68,6 +68,7 @@ class RequirementsAnalyzer:
             'requirement_1': requirement_1,
             'requirement_2': requirement_2,
             'requirement_3': requirement_3,
+            'requirement_3_pivot': requirement_3_pivot,
             'ccp_keys': ccp_keys,
             'at_keys': at_keys
         }
@@ -146,7 +147,11 @@ class RequirementsAnalyzer:
         
         requirement_3 = pd.DataFrame(requirement_3_list)
         logger.info(f"Requirement 3 count: {len(requirement_3)}")
-        return requirement_3
+        
+        # Generate pivot summary for mismatch analysis
+        pivot_summary = self._generate_pivot_summary(requirement_3)
+        
+        return requirement_3, pivot_summary
     
     def _find_mismatches(self, ccp_row, at_row, mapped_cols, at_exclude_cols):
         """
@@ -277,3 +282,50 @@ class RequirementsAnalyzer:
         combined['action'] = "UPDATE AT to match CCP and SETUP Market Exception rule in CCP"
         
         return combined
+    
+    def _generate_pivot_summary(self, requirement_3_df):
+        """
+        Generate pivot summary: column headers as rows, exchanges as columns, mismatch counts as values
+        
+        Returns a DataFrame with column headers as index and exchanges as columns
+        """
+        if requirement_3_df.empty:
+            return pd.DataFrame()
+        
+        # Extract mismatched fields and split into individual columns
+        mismatch_records = []
+        for _, row in requirement_3_df.iterrows():
+            exchange = row['exchange']
+            mismatched_fields = row.get('mismatched_fields', '')
+            
+            if pd.notna(mismatched_fields) and mismatched_fields:
+                # Split by comma and strip whitespace
+                fields = [f.strip() for f in str(mismatched_fields).split(',')]
+                for field in fields:
+                    if field:  # Ignore empty strings
+                        mismatch_records.append({
+                            'exchange': exchange,
+                            'column_header': field
+                        })
+        
+        if not mismatch_records:
+            return pd.DataFrame()
+        
+        # Create DataFrame from records
+        mismatch_df = pd.DataFrame(mismatch_records)
+        
+        # Create pivot table: column_header × exchange → count
+        pivot = pd.pivot_table(
+            mismatch_df,
+            index='column_header',
+            columns='exchange',
+            aggfunc='size',
+            fill_value=0
+        )
+        
+        # Sort by total mismatches descending
+        pivot['Total'] = pivot.sum(axis=1)
+        pivot = pivot.sort_values('Total', ascending=False)
+        
+        logger.info(f"Pivot summary generated: {len(pivot)} unique mismatched columns across {len(pivot.columns)-1} exchanges")
+        return pivot

@@ -474,20 +474,50 @@ def download_results(requirement):
         # Create Excel file in memory
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # For Requirement 3, write AT and CCP sheets + a Diffs summary
+            # For Requirement 3, write 4 sheets: Summary Report, Differences, AT, CCP
             if req_key == 'requirement_3':
-                # df contains combined rows with at_ and ccp_ prefixed columns
-                # Write AT sheet
-                at_cols = [c for c in df.columns if c.startswith('at_')]
-                base_cols = [c for c in df.columns if c in ['symbol', 'exchange']]  # Include symbol and exchange
+                # Sheet 1: Summary Report (Pivot: column headers × exchanges)
+                pivot_df = results.get('requirement_3_pivot', pd.DataFrame())
+                if not pivot_df.empty:
+                    pivot_df.to_excel(writer, sheet_name='Summary Report')
+                    ws_summary = writer.sheets['Summary Report']
+                    # Auto-adjust widths
+                    for column in ws_summary.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_summary.column_dimensions[column_letter].width = max_length + 2
                 
+                # Sheet 2: Differences (symbol, exchange, mismatched_fields)
+                diff_cols = ['symbol', 'exchange', 'mismatched_fields', 'action']
+                available_diff = [c for c in diff_cols if c in df.columns]
+                if available_diff:
+                    df_diffs = df[available_diff].copy()
+                    df_diffs.to_excel(writer, sheet_name='Differences', index=False)
+                    ws_diff = writer.sheets['Differences']
+                    for column in ws_diff.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_diff.column_dimensions[column_letter].width = max_length + 2
+                
+                # Sheet 3: AT (with at_ prefixed columns)
+                at_cols = [c for c in df.columns if c.startswith('at_')]
+                base_cols = [c for c in df.columns if c in ['symbol', 'exchange']]
                 if at_cols or base_cols:
                     df_at = df[base_cols + at_cols].copy()
-                    # remove prefix for readability
                     df_at.columns = [c.replace('at_', '') if c.startswith('at_') else c for c in df_at.columns]
                     df_at.to_excel(writer, sheet_name='AT', index=False)
-
-                    # Auto-adjust AT widths
                     ws_at = writer.sheets['AT']
                     for column in ws_at.columns:
                         max_length = 0
@@ -499,15 +529,13 @@ def download_results(requirement):
                             except:
                                 pass
                         ws_at.column_dimensions[column_letter].width = max_length + 2
-
-                # Write CCP sheet
+                
+                # Sheet 4: CCP (with ccp_ prefixed columns)
                 ccp_cols = [c for c in df.columns if c.startswith('ccp_')]
-                if base_cols or ccp_cols:
+                if ccp_cols or base_cols:
                     df_ccp = df[base_cols + ccp_cols].copy()
                     df_ccp.columns = [c.replace('ccp_', '') if c.startswith('ccp_') else c for c in df_ccp.columns]
                     df_ccp.to_excel(writer, sheet_name='CCP', index=False)
-
-                    # Auto-adjust CCP widths
                     ws_ccp = writer.sheets['CCP']
                     for column in ws_ccp.columns:
                         max_length = 0
@@ -519,27 +547,6 @@ def download_results(requirement):
                             except:
                                 pass
                         ws_ccp.column_dimensions[column_letter].width = max_length + 2
-
-                # Write Diffs summary sheet
-                # Write Diffs summary sheet: only symbol, exchange, mismatched_fields
-                diff_cols = ['symbol', 'exchange', 'mismatched_fields']
-                # Ensure columns exist
-                available = [c for c in diff_cols if c in df.columns]
-                if available:
-                    df_diffs = df[available].copy()
-                    df_diffs.to_excel(writer, sheet_name='Diffs', index=False)
-
-                    ws_d = writer.sheets['Diffs']
-                    for column in ws_d.columns:
-                        max_length = 0
-                        column_letter = column[0].column_letter
-                        for cell in column:
-                            try:
-                                if cell.value and len(str(cell.value)) > max_length:
-                                    max_length = len(str(cell.value))
-                            except:
-                                pass
-                        ws_d.column_dimensions[column_letter].width = max_length + 2
             else:
                 df.to_excel(writer, sheet_name='Results', index=False)
                 # Auto-adjust column widths for Results
