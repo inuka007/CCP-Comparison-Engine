@@ -7,6 +7,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <nav class="navbar navbar-dark shadow-sm">
@@ -49,7 +50,7 @@
                     </div>
                     <div>
                         <p class="label">Files</p>
-                        <p class="value">3 required</p>
+                        <p class="value">4 required</p>
                     </div>
                     <div>
                         <p class="label">Output</p>
@@ -71,13 +72,13 @@
             <div class="card-body">
                 <p class="text-muted mb-3">
                     <i class="bi bi-info-circle"></i>
-                    Upload the required Excel files for comparison. All 3 files must be included.
+                    Upload the required Excel files for comparison. All 4 files must be included.
                 </p>
 
                 <!-- Required Files Checklist -->
                 <div class="row mb-4">
                     <div class="col-12">
-                        <h6 class="mb-3"><strong>Required Files (3):</strong></h6>
+                        <h6 class="mb-3"><strong>Required Files (4):</strong></h6>
                         <div class="form-check mb-2">
                             <input class="form-check-input" type="checkbox" disabled id="check1">
                             <label class="form-check-label" for="check1">
@@ -94,6 +95,12 @@
                             <input class="form-check-input" type="checkbox" disabled id="check3">
                             <label class="form-check-label" for="check3">
                                 AT_Whitelist.xlsx
+                            </label>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" disabled id="check4">
+                            <label class="form-check-label" for="check4">
+                                DBeaver_Results.xlsx
                             </label>
                         </div>
                     </div>
@@ -170,119 +177,154 @@
                 </h5>
             </div>
             <div class="card-body">
-                <!-- Statistics Dashboard -->
-                <div id="statisticsDashboard" class="mb-4" style="display: none;">
-                    <h6 class="mb-3"><strong>Summary Statistics:</strong></h6>
-                    <div class="row">
-                        <div class="col-6 col-md-3">
-                            <div class="stat-card text-center">
-                                <p class="label">Total CCP Records</p>
-                                <p class="value text-primary" id="stat-ccp">0</p>
-                            </div>
-                        </div>
-                        <div class="col-6 col-md-3">
-                            <div class="stat-card text-center">
-                                <p class="label">Total AT Records</p>
-                                <p class="value text-primary" id="stat-at">0</p>
-                            </div>
-                        </div>
-                        <div class="col-6 col-md-3 mt-3 mt-md-0">
-                            <div class="stat-card text-center">
-                                <p class="label">Records in Both</p>
-                                <p class="value text-success" id="stat-common">0</p>
-                            </div>
-                        </div>
-                        <div class="col-6 col-md-3 mt-3 mt-md-0">
-                            <div class="stat-card text-center">
-                                <p class="label">Action Required</p>
-                                <p class="value text-danger" id="stat-action">0</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Comparison Summary -->
-                <div class="row mt-4" id="comparisonSummary" style="display: none;">
-                    <div class="col-md-4">
-                        <div class="summary-card border-0">
-                            <div class="summary-icon bg-danger-subtle text-danger"><i class="bi bi-plus-circle"></i></div>
-                            <div>
-                                <p class="label">Requirement 1: CCP → AT</p>
-                                <p class="value text-danger" id="req1-count">0</p>
-                                <p class="hint">Action: Add to AT Asia Whitelist</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4 mt-3 mt-md-0">
-                        <div class="summary-card border-0">
-                            <div class="summary-icon bg-warning-subtle text-warning"><i class="bi bi-question-circle"></i></div>
-                            <div>
-                                <p class="label">Requirement 2: AT → CCP</p>
-                                <p class="value text-warning" id="req2-count">0</p>
-                                <p class="hint">Action: Review/Delete or add exception</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-4 mt-3 mt-md-0">
-                        <div class="summary-card border-0">
-                            <div class="summary-icon bg-info-subtle text-info"><i class="bi bi-exclamation-circle"></i></div>
-                            <div>
-                                <p class="label">Requirement 3: Mismatch</p>
-                                <p class="value text-info" id="req3-count">0</p>
-                                <p class="hint">Action: Update AT to match CCP</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Download Panel -->
-                <div class="mt-4 pt-4 border-top" id="downloadPanel" style="display: none;">
-                    <h6 class="mb-3"><i class="bi bi-download"></i> <strong>Download Results</strong></h6>
-                    <p class="text-muted small mb-3">Download comparison results as Excel files or complete bundle:</p>
+                <!-- Overall Statistics with Chart -->
+                <div id="overallStats" class="mb-5" style="display: none;">
+                    <h5 class="mb-4 text-center"><i class="bi bi-bar-chart-fill"></i> Overall Comparison Summary</h5>
                     
-                    <!-- ZIP Bundle Download (Prominent) -->
-                    <div class="alert alert-info mb-3" style="border-left: 4px solid #0dcaf0;">
-                        <button class="btn btn-info w-100 py-2 mb-2" onclick="downloadResults('zip')">
-                            <i class="bi bi-file-earmark-zip"></i> <strong>Download All Results as ZIP</strong>
-                            <br><small>All files in one convenient bundle</small>
+                    <div class="row align-items-center">
+                        <div class="col-md-5">
+                            <canvas id="summaryChart" height="250"></canvas>
+                        </div>
+                        <div class="col-md-7">
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <div class="stat-box bg-primary-subtle">
+                                        <i class="bi bi-database-fill text-primary"></i>
+                                        <div class="stat-value" id="stat-ccp">0</div>
+                                        <div class="stat-label">CCP Records</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="stat-box bg-info-subtle">
+                                        <i class="bi bi-list-check text-info"></i>
+                                        <div class="stat-value" id="stat-at">0</div>
+                                        <div class="stat-label">AT Records</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="stat-box bg-success-subtle">
+                                        <i class="bi bi-check-circle-fill text-success"></i>
+                                        <div class="stat-value" id="stat-common">0</div>
+                                        <div class="stat-label">Matched Records</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="stat-box bg-danger-subtle">
+                                        <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+                                        <div class="stat-value" id="stat-action">0</div>
+                                        <div class="stat-label">Action Required</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Requirement Details -->
+                <div id="requirementDetails" style="display: none;">
+                    <h5 class="mb-4"><i class="bi bi-clipboard-data"></i> Requirements Analysis</h5>
+                    
+                    <!-- Requirement 1 -->
+                    <div class="requirement-card mb-4">
+                        <div class="requirement-header bg-danger-subtle">
+                            <h6 class="mb-0">
+                                <i class="bi bi-1-circle text-danger"></i> 
+                                Requirement 1: Securities in CCP but NOT in AT
+                                <span class="float-end text-danger fw-bold" id="req1-count">0</span>
+                            </h6>
+                        </div>
+                        <div class="requirement-body">
+                            <p class="small text-muted mb-3">
+                                <strong>Action:</strong> <span class="badge bg-danger">ADD</span> these securities to AT Asia Whitelist
+                            </p>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered" id="req1-summary-table">
+                                    <thead class="table-light">
+                                        <tr><th colspan="4" class="text-center">Loading summary...</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="text-end mt-2">
+                                <button class="btn btn-danger" onclick="downloadResults('req1')">
+                                    <i class="bi bi-download"></i> Download Requirement 1
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Requirement 2 -->
+                    <div class="requirement-card mb-4">
+                        <div class="requirement-header bg-warning-subtle">
+                            <h6 class="mb-0">
+                                <i class="bi bi-2-circle text-warning"></i> 
+                                Requirement 2: Securities in AT but NOT in CCP
+                                <span class="float-end text-warning fw-bold" id="req2-count">0</span>
+                            </h6>
+                        </div>
+                        <div class="requirement-body">
+                            <p class="small text-muted mb-3">
+                                <strong>Action:</strong> <span class="badge bg-warning">REVIEW</span> activity, then <span class="badge bg-danger">DELETE</span> or <span class="badge bg-info">ADD to Exception</span>
+                            </p>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered" id="req2-summary-table">
+                                    <thead class="table-light">
+                                        <tr><th colspan="4" class="text-center">Loading summary...</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="text-end mt-2">
+                                <button class="btn btn-warning" onclick="downloadResults('req2')">
+                                    <i class="bi bi-download"></i> Download Requirement 2
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Requirement 3 -->
+                    <div class="requirement-card mb-4">
+                        <div class="requirement-header bg-info-subtle">
+                            <h6 class="mb-0">
+                                <i class="bi bi-3-circle text-info"></i> 
+                                Requirement 3: Configuration Mismatch
+                                <span class="float-end text-info fw-bold" id="req3-count">0</span>
+                            </h6>
+                        </div>
+                        <div class="requirement-body">
+                            <p class="small text-muted mb-3">
+                                <strong>Action:</strong> <span class="badge bg-info">UPDATE</span> AT to match CCP configuration
+                            </p>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered" id="req3-summary-table">
+                                    <thead class="table-light">
+                                        <tr><th colspan="4" class="text-center">Loading summary...</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="text-end mt-2">
+                                <button class="btn btn-info" onclick="downloadResults('req3')">
+                                    <i class="bi bi-download"></i> Download Requirement 3
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Download All Section -->
+                <div class="mt-5 pt-4 border-top text-center" id="downloadPanel" style="display: none;">
+                    <button class="btn btn-primary btn-lg px-5 py-3" onclick="downloadResults('zip')">
+                        <i class="bi bi-file-earmark-zip fs-4"></i>
+                        <div class="mt-1">
+                            <strong>Download All Results (ZIP)</strong>
+                            <div class="small">Complete bundle with all requirements</div>
+                        </div>
+                    </button>
+                    <div class="mt-3">
+                        <button class="btn btn-outline-secondary" onclick="downloadResults('report')">
+                            <i class="bi bi-file-text"></i> Download Summary Report
                         </button>
-                    </div>
-                    
-                    <p class="text-muted small mb-2"><strong>Or download individual files:</strong></p>
-                    
-                    <div class="row g-2 download-grid">
-                        <div class="col-md-6">
-                            <button class="btn btn-light w-100 py-2" onclick="downloadResults('req1')">
-                                <div class="d-flex align-items-center justify-content-between w-100">
-                                    <span><i class="bi bi-file-earmark-excel"></i> Requirement 1</span>
-                                    <small id="req1-file-count">0 records</small>
-                                </div>
-                            </button>
-                        </div>
-                        <div class="col-md-6">
-                            <button class="btn btn-light w-100 py-2" onclick="downloadResults('req2')">
-                                <div class="d-flex align-items-center justify-content-between w-100">
-                                    <span><i class="bi bi-file-earmark-excel"></i> Requirement 2</span>
-                                    <small id="req2-file-count">0 records</small>
-                                </div>
-                            </button>
-                        </div>
-                        <div class="col-md-6">
-                            <button class="btn btn-light w-100 py-2" onclick="downloadResults('req3')">
-                                <div class="d-flex align-items-center justify-content-between w-100">
-                                    <span><i class="bi bi-file-earmark-excel"></i> Requirement 3</span>
-                                    <small id="req3-file-count">0 records</small>
-                                </div>
-                            </button>
-                        </div>
-                        <div class="col-md-6">
-                            <button class="btn btn-light w-100 py-2" onclick="downloadResults('report')">
-                                <div class="d-flex align-items-center justify-content-between w-100">
-                                    <span><i class="bi bi-file-earmark-excel"></i> Summary Report</span>
-                                    <small>All statistics</small>
-                                </div>
-                            </button>
-                        </div>
                     </div>
                     
                     <div class="mt-3">

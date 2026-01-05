@@ -15,9 +15,9 @@ import logging
 import difflib
 import re
 
-from ccp_combiner import CCPCombiner
-from requirements_analyzer import RequirementsAnalyzer
-from column_mappings import (
+from combiners.ccp_combiner import CCPCombiner
+from analyzers.requirements_analyzer import RequirementsAnalyzer
+from mappings.column_mappings import (
     get_mapped_columns,
     get_excluded_columns,
     should_compare_column,
@@ -56,6 +56,7 @@ class ComparisonEngine:
         self.ccp_sec = None
         self.ccp_rules = None
         self.at = None
+        self.dbeaver = None
         self.mapping = None
         self.ccp_combined = None
         self.ccp_symbol_col = None
@@ -139,10 +140,13 @@ class ComparisonEngine:
                 elif 'at_whitelist' in fname_lower or 'at' in fname_lower and 'whitelist' in fname_lower:
                     self.at = pd.read_excel(filepath)
                     logger.debug(f"Loaded AT whitelist from {filename}")
+                elif 'dbeaver' in fname_lower or 'dbeaver_results' in fname_lower:
+                    self.dbeaver = pd.read_excel(filepath)
+                    logger.debug(f"Loaded DBeaver Results from {filename}")
             
             # Validate required files loaded
-            if self.ccp_sec is None or self.ccp_rules is None or self.at is None:
-                logger.error(f"Loaded status - ccp_sec: {self.ccp_sec is not None}, ccp_rules: {self.ccp_rules is not None}, at: {self.at is not None}")
+            if self.ccp_sec is None or self.ccp_rules is None or self.at is None or self.dbeaver is None:
+                logger.error(f"Loaded status - ccp_sec: {self.ccp_sec is not None}, ccp_rules: {self.ccp_rules is not None}, at: {self.at is not None}, dbeaver: {self.dbeaver is not None}")
                 raise ValidationError("Not all required files were found or loaded")
             
             logger.info("Files loaded successfully")
@@ -157,7 +161,7 @@ class ComparisonEngine:
     
     def _normalize_columns(self):
         """Normalize column names across all dataframes"""
-        for df in [self.ccp_sec, self.ccp_rules, self.at]:
+        for df in [self.ccp_sec, self.ccp_rules, self.at, self.dbeaver]:
             if df is not None:
                 df.columns = (
                     df.columns.astype(str)
@@ -349,7 +353,8 @@ class ComparisonEngine:
             self.ccp_combined,
             self.at,
             self.ccp_symbol_col,
-            self.at_symbol_col
+            self.at_symbol_col,
+            self.dbeaver
         )
         
         results = analyzer.analyze()
@@ -357,8 +362,11 @@ class ComparisonEngine:
         
         return {
             'requirement_1': results['requirement_1'],
+            'requirement_1_pivot': results.get('requirement_1_pivot', None),
             'requirement_2': results['requirement_2'],
-            'requirement_3': results['requirement_3']
+            'requirement_2_pivot': results.get('requirement_2_pivot', None),
+            'requirement_3': results['requirement_3'],
+            'requirement_3_pivot': results.get('requirement_3_pivot', None)
         }
     
     # ================================

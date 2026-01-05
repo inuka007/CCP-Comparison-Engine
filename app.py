@@ -14,6 +14,7 @@ from flask import Flask, render_template, request, jsonify, send_file, session
 from werkzeug.utils import secure_filename
 import pandas as pd
 import numpy as np
+from openpyxl.styles import Font, Alignment, Border, Side
 from compare_engine import ComparisonEngine, ValidationError
 
 # ================================
@@ -168,7 +169,8 @@ def validate_uploaded_files(file_paths):
     required_files = {
         'CCP_Security_Whitelist.xlsx': ['symbol', 'exchange'],
         'CCP_Market_Rules.xlsx': ['exchange'],
-        'AT_Whitelist.xlsx': ['symbol', 'exchange']
+        'AT_Whitelist.xlsx': ['symbol', 'exchange'],
+        'DBeaver_Results.xlsx': ['ticker_id', 'source_id']
     }
     
     uploaded_filenames = {os.path.basename(p).lower(): p for p in file_paths.values()}
@@ -287,8 +289,11 @@ def run_comparison():
         # Store results in memory cache (not in session to avoid serialization issues)
         RESULTS_CACHE[results_id] = {
             'requirement_1': results['requirement_1'],
+            'requirement_1_pivot': results.get('requirement_1_pivot'),
             'requirement_2': results['requirement_2'],
+            'requirement_2_pivot': results.get('requirement_2_pivot'),
             'requirement_3': results['requirement_3'],
+            'requirement_3_pivot': results.get('requirement_3_pivot'),
             'statistics': results['statistics'],
             'timestamp': datetime.now().isoformat()
         }
@@ -363,6 +368,23 @@ def get_results():
         req2_data = clean_dataframe_for_json(results['requirement_2'])
         req3_data = clean_dataframe_for_json(results['requirement_3'])
         
+        # Get pivot/summary data
+        req1_pivot = results.get('requirement_1_pivot', pd.DataFrame())
+        req2_pivot = results.get('requirement_2_pivot', {})
+        req3_pivot = results.get('requirement_3_pivot', pd.DataFrame())
+        
+        # Clean pivot data for JSON
+        req1_summary = clean_dataframe_for_json(req1_pivot) if not req1_pivot.empty else []
+        
+        # For req2, extract overall summary
+        req2_summary = []
+        if isinstance(req2_pivot, dict):
+            overall_summary = req2_pivot.get('overall_summary', pd.DataFrame())
+            if not overall_summary.empty:
+                req2_summary = clean_dataframe_for_json(overall_summary)
+        
+        req3_summary = clean_dataframe_for_json(req3_pivot) if not req3_pivot.empty else []
+        
         # Return limited preview (first 100 rows per requirement)
         return jsonify({
             'success': True,
@@ -371,17 +393,20 @@ def get_results():
             'requirement_1': {
                 'data': req1_data[:100],
                 'total': len(req1_data),
-                'preview': True if len(req1_data) > 100 else False
+                'preview': True if len(req1_data) > 100 else False,
+                'summary': req1_summary
             },
             'requirement_2': {
                 'data': req2_data[:100],
                 'total': len(req2_data),
-                'preview': True if len(req2_data) > 100 else False
+                'preview': True if len(req2_data) > 100 else False,
+                'summary': req2_summary
             },
             'requirement_3': {
                 'data': req3_data[:100],
                 'total': len(req3_data),
-                'preview': True if len(req3_data) > 100 else False
+                'preview': True if len(req3_data) > 100 else False,
+                'summary': req3_summary
             }
         }), 200
     
@@ -428,54 +453,205 @@ def download_results(requirement):
         req_key, filename = requirement_map[requirement]
         
         if req_key == 'report':
-            # Generate summary report
-            report_data = {
-                "Metric": [
-                    "Total CCP Records (Merged)",
-                    "Total AT Records",
-                    "Records in Both (No Action Required)",
-                    "",
-                    "REQUIREMENT 1: Securities in CCP but NOT in AT",
-                    "  → Action: ADD to AT Asia Whitelist",
-                    "",
-                    "REQUIREMENT 2: Securities in AT but NOT in CCP",
-                    "  → Action: REVIEW activity/positions - DELETE or ADD to Exception List",
-                    "",
-                    "REQUIREMENT 3: Securities in BOTH with Config Mismatch",
-                    "  → Action: UPDATE AT to match CCP & Setup Market Exception rule",
-                    "",
-                    "TOTAL Records Requiring Action",
-                    "",
-                    "Report Generated"
-                ],
-                "Count/Value": [
-                    results['statistics'].get('total_ccp', 0),
-                    results['statistics'].get('total_at', 0),
-                    results['statistics'].get('total_common', 0),
-                    "",
-                    len(results['requirement_1']),
-                    f"{len(results['requirement_1'])} records",
-                    "",
-                    len(results['requirement_2']),
-                    f"{len(results['requirement_2'])} records",
-                    "",
-                    len(results['requirement_3']),
-                    f"{len(results['requirement_3'])} records",
-                    "",
-                    len(results['requirement_1']) + len(results['requirement_2']) + len(results['requirement_3']),
-                    "",
-                    results['timestamp']
-                ]
-            }
-            df = pd.DataFrame(report_data)
+            # Generate comprehensive summary report matching the specified format
+            output = io.BytesIO()
+            
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+                
+                wb = writer.book
+                ws = wb.create_sheet('Summary Report', 0)
+                
+                # Remove default sheet if it exists
+                if 'Sheet' in wb.sheetnames:
+                    wb.remove(wb['Sheet'])
+                
+                current_row = 1
+                
+                # Helper function to write section header
+                def write_section_header(row, title, subtitle=""):
+                    ws.merge_cells(f'A{row}:C{row}')
+                    ws.cell(row=row, column=1, value=title)
+                    ws.cell(row=row, column=1).font = Font(bold=True, size=12)
+                    if subtitle:
+                        row += 1
+                        ws.merge_cells(f'A{row}:C{row}')
+                        ws.cell(row=row, column=1, value=subtitle)
+                        ws.cell(row=row, column=1).font = Font(italic=True, size=10)
+                    return row + 1
+                
+                # === SECTION 1: In CCP but not in AT ===
+                current_row = write_section_header(current_row, "In CCP but not in AT", 
+                                                    "Grouped according to CCP product segment classifications")
+                
+                # Headers
+                ws.cell(row=current_row, column=1, value="Count")
+                ws.cell(row=current_row, column=2, value="CCP Segment")
+                ws.cell(row=current_row, column=3, value="Comments")
+                for col in range(1, 4):
+                    ws.cell(row=current_row, column=col).font = Font(bold=True)
+                current_row += 1
+                
+                # Get Requirement 1 data
+                req1_pivot = results.get('requirement_1_pivot', pd.DataFrame())
+                if not req1_pivot.empty:
+                    segment_map = {
+                        'US EQUITY': 'US Equity',
+                        'US ETP': 'US ETP',
+                        'EUROPEAN EQUITY': 'European Equity',
+                        'EUROPEAN ETP': 'European ETP',
+                        'ASIA EQUITY': 'ASIA Equity',
+                        'ASIA ETP': 'ASIA ETP'
+                    }
+                    
+                    comments_map = {
+                        'US ETP': 'Report total Funding requirement per 1 security unit. Sign off from Manjula required. Cecil required to update AT table',
+                        'European Equity': ''
+                    }
+                    
+                    for _, row in req1_pivot.iterrows():
+                        segment_name = row.get('Segment Name', '')
+                        count = row.get('CCP # Securities', 0)
+                        
+                        if count > 0:
+                            display_name = segment_map.get(segment_name, segment_name)
+                            ws.cell(row=current_row, column=1, value=int(count))
+                            ws.cell(row=current_row, column=2, value=display_name)
+                            ws.cell(row=current_row, column=3, value=comments_map.get(display_name, ''))
+                            current_row += 1
+                
+                current_row += 1  # Blank row
+                
+                # === SECTION 2: In AT but not in CCP ===
+                current_row = write_section_header(current_row, "In AT but not in CCP",
+                                                    "Grouped according to data feed classifications")
+                
+                # Headers
+                ws.cell(row=current_row, column=1, value="Count")
+                ws.cell(row=current_row, column=2, value="Region / Product (TCL1)")
+                ws.cell(row=current_row, column=3, value="Comments")
+                for col in range(1, 4):
+                    ws.cell(row=current_row, column=col).font = Font(bold=True)
+                current_row += 1
+                
+                # Get Requirement 2 data
+                req2_pivot = results.get('requirement_2_pivot', {})
+                overall_summary = req2_pivot.get('overall_summary', pd.DataFrame())
+                
+                if not overall_summary.empty:
+                    # Define the region-product breakdown
+                    region_product_order = [
+                        ('Americas', 'Equities', 'Americas - Equities'),
+                        ('Americas', 'ETPs', 'Americas - ETPs'),
+                        ('Europe', 'Equities', 'Europe -Equities'),
+                        ('Europe', 'ETPs', 'Europe -ETPs'),
+                        ('Asia', 'Equities', 'ASIA - Equities'),
+                        ('Asia', 'ETPs', 'ASIA - ETPs')
+                    ]
+                    
+                    # Calculate counts from regional summaries
+                    req2_df = results.get('requirement_2', pd.DataFrame())
+                    from mappings.segment_mapping import get_region_for_exchange
+                    
+                    region_product_counts = {}
+                    if not req2_df.empty and 'tcl1_desc' in req2_df.columns:
+                        for _, row in req2_df.iterrows():
+                            region = get_region_for_exchange(row.get('exchange', ''))
+                            if region:
+                                region_display = 'Americas' if region == 'US' else ('Europe' if region == 'EUROPE' else 'Asia')
+                                tcl1 = str(row.get('tcl1_desc', '')).strip().upper()
+                                
+                                # Classify as Equity or ETP
+                                is_etp = any(keyword in tcl1 for keyword in ['ETP', 'ETF', 'ETN', 'FUND']) if tcl1 else False
+                                product_type = 'ETPs' if is_etp else 'Equities'
+                                
+                                key = (region_display, product_type)
+                                region_product_counts[key] = region_product_counts.get(key, 0) + 1
+                    
+                    # Long comment for Americas - ETPs
+                    americas_etps_comment = ("1. Analyse and extend CCP content (relax risk metrics, add additional sub products "
+                                            "ie GDRs).  2. Analyse client trade and position data vs securities not supported by "
+                                            "raw risk metrics. A) Securities with no client activity to be deleted.  B) Securities with "
+                                            "activity to discuss treatment (clients to be unwound ? securities to be added to CCP "
+                                            "as an exception)")
+                    
+                    for region, product, display_name in region_product_order:
+                        count = region_product_counts.get((region, product), 0)
+                        ws.cell(row=current_row, column=1, value=count)
+                        ws.cell(row=current_row, column=2, value=display_name)
+                        
+                        # Add comment for Americas - ETPs
+                        if region == 'Americas' and product == 'ETPs':
+                            ws.cell(row=current_row, column=3, value=americas_etps_comment)
+                        
+                        current_row += 1
+                
+                # Add assumption note
+                ws.merge_cells(f'A{current_row}:C{current_row}')
+                ws.cell(row=current_row, column=1, value="Assumption - Product classification in data feed database is correct")
+                ws.cell(row=current_row, column=1).font = Font(italic=True, size=9)
+                current_row += 2  # Extra blank row
+                
+                # === SECTION 3: In AT and CCP but with Mismatch Configurations ===
+                current_row = write_section_header(current_row, "In AT and CCP but with  Mismatch Configurations",
+                                                    "Grouped according to CCP configuration type")
+                
+                # Headers
+                ws.cell(row=current_row, column=1, value="Count")
+                ws.cell(row=current_row, column=2, value="Configuration type")
+                ws.cell(row=current_row, column=3, value="Comments")
+                for col in range(1, 4):
+                    ws.cell(row=current_row, column=col).font = Font(bold=True)
+                current_row += 1
+                
+                # Get Requirement 3 data
+                req3_pivot = results.get('requirement_3_pivot', pd.DataFrame())
+                
+                if not req3_pivot.empty and 'Total' in req3_pivot.columns:
+                    # Get all configuration types by total count
+                    config_types = req3_pivot.sort_values('Total', ascending=False)
+                    
+                    config_comment = ("Update AT or CCP configuration accordingly to match (across whole market). If "
+                                     "configuration is required in CCP for a subset of securities, exceptions to be created.")
+                    
+                    for idx, (config_name, row) in enumerate(config_types.iterrows()):
+                        total_count = int(row['Total'])
+                        
+                        ws.cell(row=current_row, column=1, value=total_count)
+                        ws.cell(row=current_row, column=2, value=config_name)
+                        
+                        # Add comment to second config type
+                        if idx == 1:
+                            ws.cell(row=current_row, column=3, value=config_comment)
+                        
+                        current_row += 1
+                
+                # Adjust column widths
+                ws.column_dimensions['A'].width = 10
+                ws.column_dimensions['B'].width = 50
+                ws.column_dimensions['C'].width = 80
+            
+            output.seek(0)
+            
+            logger.info(f"Downloaded {filename}")
+            
+            return send_file(
+                output,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                as_attachment=True,
+                download_name=filename
+            )
+        
         else:
             df = results[req_key]
         
         # Create Excel file in memory
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # For Requirement 3, write 4 sheets: Summary Report, Differences, AT, CCP
-            if req_key == 'requirement_3':
+        
+        # Special handling for different requirement types
+        if req_key == 'requirement_3':
+            # Requirement 3: 4 sheets (Summary, Differences, AT, CCP)
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 # Sheet 1: Summary Report (Pivot: column headers × exchanges)
                 pivot_df = results.get('requirement_3_pivot', pd.DataFrame())
                 if not pivot_df.empty:
@@ -547,7 +723,218 @@ def download_results(requirement):
                             except:
                                 pass
                         ws_ccp.column_dimensions[column_letter].width = max_length + 2
-            else:
+        
+        elif req_key == 'requirement_1':
+            # Requirement 1: 2 sheets (Summary Report + Details)
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                # Sheet 1: Summary Report (Segment-wise breakdown)
+                summary_df = results.get('requirement_1_pivot', pd.DataFrame())
+                if not summary_df.empty:
+                    summary_df.to_excel(writer, sheet_name='Summary Report', index=False)
+                    ws_summary = writer.sheets['Summary Report']
+                    for column in ws_summary.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_summary.column_dimensions[column_letter].width = max_length + 2
+                
+                # Sheet 2: Details (full list of securities)
+                df.to_excel(writer, sheet_name='Details', index=False)
+                ws_details = writer.sheets['Details']
+                for column in ws_details.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if cell.value and len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    ws_details.column_dimensions[column_letter].width = max_length + 2
+        
+        elif req_key == 'requirement_2':
+            # Requirement 2: 5 sheets (Overall Summary + 3 Regional Summaries + Details)
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                req2_pivot = results.get('requirement_2_pivot', {})
+                
+                # Sheet 1: Overall Summary (comparable vs uncomparable per region)
+                overall_summary = req2_pivot.get('overall_summary', pd.DataFrame())
+                if not overall_summary.empty:
+                    overall_summary.to_excel(writer, sheet_name='Overall Summary', index=False)
+                    ws_overall = writer.sheets['Overall Summary']
+                    for column in ws_overall.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_overall.column_dimensions[column_letter].width = max_length + 2
+                
+                # Sheets 2-4: Regional summaries (Americas, Asia, Europe)
+                regional_summaries = req2_pivot.get('regional_summaries', {})
+                if isinstance(regional_summaries, dict):
+                    for region_name, summary_df in regional_summaries.items():
+                        if not summary_df.empty:
+                            # Create pivot-style hierarchical layout
+                            ws_region = writer.book.create_sheet(title=region_name)
+                            
+                            # Define styles
+                            header_font = Font(bold=True, size=11)
+                            level1_font = Font(bold=True, size=10)
+                            level2_font = Font(size=10)
+                            level3_font = Font(size=10)
+                            border = Border(
+                                bottom=Side(style='thin', color='CCCCCC')
+                            )
+                            right_align = Alignment(horizontal='right', vertical='center')
+                            
+                            current_row = 1
+                            
+                            # Add explanatory note at the top
+                            ws_region.merge_cells('A1:B1')
+                            ws_region.cell(row=current_row, column=1, value='Note: Blank TCL2/TCL3 values indicate missing data from DBeaver source')
+                            ws_region.cell(row=current_row, column=1).font = Font(italic=True, size=9, color='666666')
+                            current_row += 1
+                            
+                            # Write header
+                            ws_region.cell(row=current_row, column=1, value='Row Labels')
+                            ws_region.cell(row=current_row, column=2, value='Count of Records')
+                            
+                            for col in range(1, 3):
+                                cell = ws_region.cell(row=current_row, column=col)
+                                cell.font = header_font
+                                cell.border = border
+                            
+                            ws_region.cell(row=current_row, column=2).alignment = right_align
+                            current_row += 1
+                            
+                            # Get the full data from Details to build hierarchy
+                            full_data_df = results.get('requirement_2', pd.DataFrame())
+                            
+                            # Filter for this region
+                            from mappings.segment_mapping import get_region_for_exchange
+                            region_map = {'Americas': 'US', 'Asia': 'ASIA', 'Europe': 'EUROPE'}
+                            region_key = region_map.get(region_name, region_name)
+                            
+                            region_full_data = full_data_df[
+                                full_data_df['exchange'].apply(lambda x: get_region_for_exchange(x)) == region_key
+                            ].copy()
+                            
+                            # Build hierarchical structure (exclude blank TCL1 - those go to Unresolved)
+                            # Group by TCL1 -> TCL2 -> TCL3
+                            if 'tcl1_desc' in region_full_data.columns:
+                                hierarchy = {}
+                                
+                                for _, row in region_full_data.iterrows():
+                                    tcl1 = row.get('tcl1_desc', '') if pd.notna(row.get('tcl1_desc')) else ''
+                                    
+                                    # Skip blank TCL1 - they will go to Unresolved sheet
+                                    if not tcl1:
+                                        continue
+                                    
+                                    tcl2 = row.get('tcl2_desc', '') if pd.notna(row.get('tcl2_desc')) else ''
+                                    tcl3 = row.get('tcl3_desc', '') if pd.notna(row.get('tcl3_desc')) else ''
+                                    
+                                    if tcl1 not in hierarchy:
+                                        hierarchy[tcl1] = {}
+                                    if tcl2 not in hierarchy[tcl1]:
+                                        hierarchy[tcl1][tcl2] = {}
+                                    if tcl3 not in hierarchy[tcl1][tcl2]:
+                                        hierarchy[tcl1][tcl2][tcl3] = 0
+                                    hierarchy[tcl1][tcl2][tcl3] += 1
+                                
+                                grand_total = 0
+                                
+                                # Write hierarchical data
+                                for tcl1 in sorted(hierarchy.keys()):
+                                    tcl1_total = sum(sum(tcl3_counts.values()) for tcl3_counts in hierarchy[tcl1].values())
+                                    
+                                    # Write TCL1 (Level 1 - No indentation, bold)
+                                    ws_region.cell(row=current_row, column=1, value=tcl1)
+                                    ws_region.cell(row=current_row, column=2, value=tcl1_total)
+                                    ws_region.cell(row=current_row, column=1).font = level1_font
+                                    ws_region.cell(row=current_row, column=2).font = level1_font
+                                    ws_region.cell(row=current_row, column=2).alignment = right_align
+                                    current_row += 1
+                                    
+                                    for tcl2 in sorted(hierarchy[tcl1].keys()):
+                                        tcl2_total = sum(hierarchy[tcl1][tcl2].values())
+                                        
+                                        # Write TCL2 (Level 2 - Single indent)
+                                        ws_region.cell(row=current_row, column=1, value=f'  {tcl2}')
+                                        ws_region.cell(row=current_row, column=2, value=tcl2_total)
+                                        ws_region.cell(row=current_row, column=1).font = level2_font
+                                        ws_region.cell(row=current_row, column=2).font = level2_font
+                                        ws_region.cell(row=current_row, column=2).alignment = right_align
+                                        current_row += 1
+                                        
+                                        for tcl3 in sorted(hierarchy[tcl1][tcl2].keys()):
+                                            tcl3_count = hierarchy[tcl1][tcl2][tcl3]
+                                            
+                                            # Write TCL3 (Level 3 - Double indent)
+                                            ws_region.cell(row=current_row, column=1, value=f'    {tcl3}')
+                                            ws_region.cell(row=current_row, column=2, value=tcl3_count)
+                                            ws_region.cell(row=current_row, column=1).font = level3_font
+                                            ws_region.cell(row=current_row, column=2).font = level3_font
+                                            ws_region.cell(row=current_row, column=2).alignment = right_align
+                                            current_row += 1
+                                    
+                                    grand_total += tcl1_total
+                                
+                                # Write Grand Total
+                                ws_region.cell(row=current_row, column=1, value='Grand Total')
+                                ws_region.cell(row=current_row, column=2, value=grand_total)
+                                ws_region.cell(row=current_row, column=1).font = Font(bold=True, size=10)
+                                ws_region.cell(row=current_row, column=2).font = Font(bold=True, size=10)
+                                ws_region.cell(row=current_row, column=2).alignment = right_align
+                                ws_region.cell(row=current_row, column=1).border = Border(top=Side(style='thin', color='000000'))
+                                ws_region.cell(row=current_row, column=2).border = Border(top=Side(style='thin', color='000000'))
+                            
+                            # Auto-adjust column widths
+                            ws_region.column_dimensions['A'].width = 60
+                            ws_region.column_dimensions['B'].width = 18
+                
+                # Sheet 5: Do not exist in DB (records with blank TCL1)
+                unresolved_df = df[df['tcl1_desc'].isna() | (df['tcl1_desc'] == '')].copy()
+                if not unresolved_df.empty:
+                    unresolved_df.to_excel(writer, sheet_name='Do not exist in DB', index=False)
+                    ws_unresolved = writer.sheets['Do not exist in DB']
+                    for column in ws_unresolved.columns:
+                        max_length = 0
+                        column_letter = column[0].column_letter
+                        for cell in column:
+                            try:
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
+                            except:
+                                pass
+                        ws_unresolved.column_dimensions[column_letter].width = max_length + 2
+                
+                # Sheet 6: Details (full list of AT securities with DBeaver enrichment)
+                df.to_excel(writer, sheet_name='Details', index=False)
+                ws_details = writer.sheets['Details']
+                for column in ws_details.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if cell.value and len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    ws_details.column_dimensions[column_letter].width = max_length + 2
+        
+        else:
+            # Standard single sheet format
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, sheet_name='Results', index=False)
                 # Auto-adjust column widths for Results
                 worksheet = writer.sheets['Results']
@@ -612,81 +999,469 @@ def download_zip():
             ]
             
             for file_type, cache_key, filename in files_to_zip:
-                # Generate individual file
+                # Generate individual file using SAME logic as individual downloads
                 output = io.BytesIO()
                 
                 if cache_key == 'report':
-                    # Generate summary report
-                    report_data = {
-                        "Metric": [
-                            "Total CCP Records (Merged)",
-                            "Total AT Records",
-                            "Records in Both (No Action Required)",
-                            "",
-                            "REQUIREMENT 1: Securities in CCP but NOT in AT",
-                            "  → Action: ADD to AT Asia Whitelist",
-                            "",
-                            "REQUIREMENT 2: Securities in AT but NOT in CCP",
-                            "  → Action: REVIEW activity/positions - DELETE or ADD to Exception List",
-                            "",
-                            "REQUIREMENT 3: Securities in BOTH with Config Mismatch",
-                            "  → Action: UPDATE AT to match CCP & Setup Market Exception rule",
-                            "",
-                            "TOTAL Records Requiring Action",
-                            "",
-                            "Report Generated"
-                        ],
-                        "Count/Value": [
-                            results['statistics'].get('total_ccp', 0),
-                            results['statistics'].get('total_at', 0),
-                            results['statistics'].get('total_common', 0),
-                            "",
-                            len(results['requirement_1']),
-                            f"{len(results['requirement_1'])} records",
-                            "",
-                            len(results['requirement_2']),
-                            f"{len(results['requirement_2'])} records",
-                            "",
-                            len(results['requirement_3']),
-                            f"{len(results['requirement_3'])} records",
-                            "",
-                            len(results['requirement_1']) + len(results['requirement_2']) + len(results['requirement_3']),
-                            "",
-                            results['timestamp']
-                        ]
-                    }
-                    df = pd.DataFrame(report_data)
-                else:
-                    df = results[cache_key]
-                
-                # Write to BytesIO
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    if cache_key == 'requirement_3':
-                        # Write AT sheet
-                        at_cols = [c for c in df.columns if c.startswith('at_')]
-                        base_cols = [c for c in df.columns if c in ['symbol', 'exchange']]  # Include symbol and exchange
+                    # Generate comprehensive summary report matching the specified format
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
                         
+                        wb = writer.book
+                        ws = wb.create_sheet('Summary Report', 0)
+                        
+                        # Remove default sheet if it exists
+                        if 'Sheet' in wb.sheetnames:
+                            wb.remove(wb['Sheet'])
+                        
+                        current_row = 1
+                        
+                        # Helper function to write section header
+                        def write_section_header(row, title, subtitle=""):
+                            ws.merge_cells(f'A{row}:C{row}')
+                            ws.cell(row=row, column=1, value=title)
+                            ws.cell(row=row, column=1).font = Font(bold=True, size=12)
+                            if subtitle:
+                                row += 1
+                                ws.merge_cells(f'A{row}:C{row}')
+                                ws.cell(row=row, column=1, value=subtitle)
+                                ws.cell(row=row, column=1).font = Font(italic=True, size=10)
+                            return row + 1
+                        
+                        # === SECTION 1: In CCP but not in AT ===
+                        current_row = write_section_header(current_row, "In CCP but not in AT", 
+                                                            "Grouped according to CCP product segment classifications")
+                        
+                        # Headers
+                        ws.cell(row=current_row, column=1, value="Count")
+                        ws.cell(row=current_row, column=2, value="CCP Segment")
+                        ws.cell(row=current_row, column=3, value="Comments")
+                        for col in range(1, 4):
+                            ws.cell(row=current_row, column=col).font = Font(bold=True)
+                        current_row += 1
+                        
+                        # Get Requirement 1 data
+                        req1_pivot = results.get('requirement_1_pivot', pd.DataFrame())
+                        if not req1_pivot.empty:
+                            segment_map = {
+                                'US EQUITY': 'US Equity',
+                                'US ETP': 'US ETP',
+                                'EUROPEAN EQUITY': 'European Equity',
+                                'EUROPEAN ETP': 'European ETP',
+                                'ASIA EQUITY': 'ASIA Equity',
+                                'ASIA ETP': 'ASIA ETP'
+                            }
+                            
+                            comments_map = {
+                                'US ETP': 'Report total Funding requirement per 1 security unit. Sign off from Manjula required. Cecil required to update AT table',
+                                'European Equity': ''
+                            }
+                            
+                            for _, row in req1_pivot.iterrows():
+                                segment_name = row.get('Segment Name', '')
+                                count = row.get('CCP # Securities', 0)
+                                
+                                if count > 0:
+                                    display_name = segment_map.get(segment_name, segment_name)
+                                    ws.cell(row=current_row, column=1, value=int(count))
+                                    ws.cell(row=current_row, column=2, value=display_name)
+                                    ws.cell(row=current_row, column=3, value=comments_map.get(display_name, ''))
+                                    current_row += 1
+                        
+                        current_row += 1  # Blank row
+                        
+                        # === SECTION 2: In AT but not in CCP ===
+                        current_row = write_section_header(current_row, "In AT but not in CCP",
+                                                            "Grouped according to data feed classifications")
+                        
+                        # Headers
+                        ws.cell(row=current_row, column=1, value="Count")
+                        ws.cell(row=current_row, column=2, value="Region / Product (TCL1)")
+                        ws.cell(row=current_row, column=3, value="Comments")
+                        for col in range(1, 4):
+                            ws.cell(row=current_row, column=col).font = Font(bold=True)
+                        current_row += 1
+                        
+                        # Get Requirement 2 data
+                        req2_pivot = results.get('requirement_2_pivot', {})
+                        overall_summary = req2_pivot.get('overall_summary', pd.DataFrame())
+                        
+                        if not overall_summary.empty:
+                            # Define the region-product breakdown
+                            region_product_order = [
+                                ('Americas', 'Equities', 'Americas - Equities'),
+                                ('Americas', 'ETPs', 'Americas - ETPs'),
+                                ('Europe', 'Equities', 'Europe -Equities'),
+                                ('Europe', 'ETPs', 'Europe -ETPs'),
+                                ('Asia', 'Equities', 'ASIA - Equities'),
+                                ('Asia', 'ETPs', 'ASIA - ETPs')
+                            ]
+                            
+                            # Calculate counts from regional summaries
+                            req2_df = results.get('requirement_2', pd.DataFrame())
+                            from mappings.segment_mapping import get_region_for_exchange
+                            
+                            region_product_counts = {}
+                            if not req2_df.empty and 'tcl1_desc' in req2_df.columns:
+                                for _, row in req2_df.iterrows():
+                                    region = get_region_for_exchange(row.get('exchange', ''))
+                                    if region:
+                                        region_display = 'Americas' if region == 'US' else ('Europe' if region == 'EUROPE' else 'Asia')
+                                        tcl1 = str(row.get('tcl1_desc', '')).strip().upper()
+                                        
+                                        # Classify as Equity or ETP
+                                        is_etp = any(keyword in tcl1 for keyword in ['ETP', 'ETF', 'ETN', 'FUND']) if tcl1 else False
+                                        product_type = 'ETPs' if is_etp else 'Equities'
+                                        
+                                        key = (region_display, product_type)
+                                        region_product_counts[key] = region_product_counts.get(key, 0) + 1
+                            
+                            # Long comment for Americas - ETPs
+                            americas_etps_comment = ("1. Analyse and extend CCP content (relax risk metrics, add additional sub products "
+                                                    "ie GDRs).  2. Analyse client trade and position data vs securities not supported by "
+                                                    "raw risk metrics. A) Securities with no client activity to be deleted.  B) Securities with "
+                                                    "activity to discuss treatment (clients to be unwound ? securities to be added to CCP "
+                                                    "as an exception)")
+                            
+                            for region, product, display_name in region_product_order:
+                                count = region_product_counts.get((region, product), 0)
+                                ws.cell(row=current_row, column=1, value=count)
+                                ws.cell(row=current_row, column=2, value=display_name)
+                                
+                                # Add comment for Americas - ETPs
+                                if region == 'Americas' and product == 'ETPs':
+                                    ws.cell(row=current_row, column=3, value=americas_etps_comment)
+                                
+                                current_row += 1
+                        
+                        # Add assumption note
+                        ws.merge_cells(f'A{current_row}:C{current_row}')
+                        ws.cell(row=current_row, column=1, value="Assumption - Product classification in data feed database is correct")
+                        ws.cell(row=current_row, column=1).font = Font(italic=True, size=9)
+                        current_row += 2  # Extra blank row
+                        
+                        # === SECTION 3: In AT and CCP but with Mismatch Configurations ===
+                        current_row = write_section_header(current_row, "In AT and CCP but with  Mismatch Configurations",
+                                                            "Grouped according to CCP configuration type")
+                        
+                        # Headers
+                        ws.cell(row=current_row, column=1, value="Count")
+                        ws.cell(row=current_row, column=2, value="Configuration type")
+                        ws.cell(row=current_row, column=3, value="Comments")
+                        for col in range(1, 4):
+                            ws.cell(row=current_row, column=col).font = Font(bold=True)
+                        current_row += 1
+                        
+                        # Get Requirement 3 data
+                        req3_pivot = results.get('requirement_3_pivot', pd.DataFrame())
+                        
+                        if not req3_pivot.empty and 'Total' in req3_pivot.columns:
+                            # Get all configuration types by total count
+                            config_types = req3_pivot.sort_values('Total', ascending=False)
+                            
+                            config_comment = ("Update AT or CCP configuration accordingly to match (across whole market). If "
+                                             "configuration is required in CCP for a subset of securities, exceptions to be created.")
+                            
+                            for idx, (config_name, row) in enumerate(config_types.iterrows()):
+                                total_count = int(row['Total'])
+                                
+                                ws.cell(row=current_row, column=1, value=total_count)
+                                ws.cell(row=current_row, column=2, value=config_name)
+                                
+                                # Add comment to second config type
+                                if idx == 1:
+                                    ws.cell(row=current_row, column=3, value=config_comment)
+                                
+                                current_row += 1
+                        
+                        # Adjust column widths
+                        ws.column_dimensions['A'].width = 10
+                        ws.column_dimensions['B'].width = 50
+                        ws.column_dimensions['C'].width = 80
+                
+                elif cache_key == 'requirement_1':
+                    # Requirement 1: 2 sheets (Summary Report + Details)
+                    df = results[cache_key]
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # Sheet 1: Summary Report (Segment-wise breakdown)
+                        summary_df = results.get('requirement_1_pivot', pd.DataFrame())
+                        if not summary_df.empty:
+                            summary_df.to_excel(writer, sheet_name='Summary Report', index=False)
+                            ws_summary = writer.sheets['Summary Report']
+                            for column in ws_summary.columns:
+                                max_length = 0
+                                column_letter = column[0].column_letter
+                                for cell in column:
+                                    try:
+                                        if cell.value and len(str(cell.value)) > max_length:
+                                            max_length = len(str(cell.value))
+                                    except:
+                                        pass
+                                ws_summary.column_dimensions[column_letter].width = max_length + 2
+                        
+                        # Sheet 2: Details (full list of securities)
+                        df.to_excel(writer, sheet_name='Details', index=False)
+                        ws_details = writer.sheets['Details']
+                        for column in ws_details.columns:
+                            max_length = 0
+                            column_letter = column[0].column_letter
+                            for cell in column:
+                                try:
+                                    if cell.value and len(str(cell.value)) > max_length:
+                                        max_length = len(str(cell.value))
+                                except:
+                                    pass
+                            ws_details.column_dimensions[column_letter].width = max_length + 2
+                
+                elif cache_key == 'requirement_2':
+                    # Requirement 2: 6 sheets (Overall Summary + 3 Regional Summaries + Unresolved + Details)
+                    df = results[cache_key]
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        req2_pivot = results.get('requirement_2_pivot', {})
+                        
+                        # Sheet 1: Overall Summary
+                        overall_summary = req2_pivot.get('overall_summary', pd.DataFrame())
+                        if not overall_summary.empty:
+                            overall_summary.to_excel(writer, sheet_name='Overall Summary', index=False)
+                            ws_overall = writer.sheets['Overall Summary']
+                            for column in ws_overall.columns:
+                                max_length = 0
+                                column_letter = column[0].column_letter
+                                for cell in column:
+                                    try:
+                                        if cell.value and len(str(cell.value)) > max_length:
+                                            max_length = len(str(cell.value))
+                                    except:
+                                        pass
+                                ws_overall.column_dimensions[column_letter].width = max_length + 2
+                        
+                        # Sheets 2-4: Regional summaries (Americas, Asia, Europe)
+                        regional_summaries = req2_pivot.get('regional_summaries', {})
+                        if isinstance(regional_summaries, dict):
+                            for region_name, summary_df in regional_summaries.items():
+                                if not summary_df.empty:
+                                    # Create pivot-style hierarchical layout
+                                    ws_region = writer.book.create_sheet(title=region_name)
+                                    
+                                    # Define styles
+                                    from openpyxl.styles import Font, Alignment, Border, Side
+                                    header_font = Font(bold=True, size=11)
+                                    level1_font = Font(bold=True, size=10)
+                                    level2_font = Font(size=10)
+                                    level3_font = Font(size=10)
+                                    border = Border(bottom=Side(style='thin', color='CCCCCC'))
+                                    right_align = Alignment(horizontal='right', vertical='center')
+                                    
+                                    current_row = 1
+                                    
+                                    # Add explanatory note at the top
+                                    ws_region.merge_cells('A1:B1')
+                                    ws_region.cell(row=current_row, column=1, value='Note: Blank TCL2/TCL3 values indicate missing data from DBeaver source')
+                                    ws_region.cell(row=current_row, column=1).font = Font(italic=True, size=9, color='666666')
+                                    current_row += 1
+                                    
+                                    # Write header
+                                    ws_region.cell(row=current_row, column=1, value='Row Labels')
+                                    ws_region.cell(row=current_row, column=2, value='Count of Records')
+                                    
+                                    for col in range(1, 3):
+                                        cell = ws_region.cell(row=current_row, column=col)
+                                        cell.font = header_font
+                                        cell.border = border
+                                    
+                                    ws_region.cell(row=current_row, column=2).alignment = right_align
+                                    current_row += 1
+                                    
+                                    # Get the full data from Details to build hierarchy
+                                    full_data_df = results.get('requirement_2', pd.DataFrame())
+                                    
+                                    # Filter for this region
+                                    from mappings.segment_mapping import get_region_for_exchange
+                                    region_map = {'Americas': 'US', 'Asia': 'ASIA', 'Europe': 'EUROPE'}
+                                    region_key = region_map.get(region_name, region_name)
+                                    
+                                    region_full_data = full_data_df[
+                                        full_data_df['exchange'].apply(lambda x: get_region_for_exchange(x)) == region_key
+                                    ].copy()
+                                    
+                                    # Build hierarchical structure (exclude blank TCL1)
+                                    if 'tcl1_desc' in region_full_data.columns:
+                                        hierarchy = {}
+                                        
+                                        for _, row in region_full_data.iterrows():
+                                            tcl1 = row.get('tcl1_desc', '') if pd.notna(row.get('tcl1_desc')) else ''
+                                            
+                                            # Skip blank TCL1 - they will go to Unresolved sheet
+                                            if not tcl1:
+                                                continue
+                                            
+                                            tcl2 = row.get('tcl2_desc', '') if pd.notna(row.get('tcl2_desc')) else ''
+                                            tcl3 = row.get('tcl3_desc', '') if pd.notna(row.get('tcl3_desc')) else ''
+                                            
+                                            if tcl1 not in hierarchy:
+                                                hierarchy[tcl1] = {}
+                                            if tcl2 not in hierarchy[tcl1]:
+                                                hierarchy[tcl1][tcl2] = {}
+                                            if tcl3 not in hierarchy[tcl1][tcl2]:
+                                                hierarchy[tcl1][tcl2][tcl3] = 0
+                                            hierarchy[tcl1][tcl2][tcl3] += 1
+                                        
+                                        grand_total = 0
+                                        
+                                        # Write hierarchical data
+                                        for tcl1 in sorted(hierarchy.keys()):
+                                            tcl1_total = sum(sum(tcl3_counts.values()) for tcl3_counts in hierarchy[tcl1].values())
+                                            
+                                            # Write TCL1 (Level 1 - No indentation, bold)
+                                            ws_region.cell(row=current_row, column=1, value=tcl1)
+                                            ws_region.cell(row=current_row, column=2, value=tcl1_total)
+                                            ws_region.cell(row=current_row, column=1).font = level1_font
+                                            ws_region.cell(row=current_row, column=2).font = level1_font
+                                            ws_region.cell(row=current_row, column=2).alignment = right_align
+                                            current_row += 1
+                                            
+                                            for tcl2 in sorted(hierarchy[tcl1].keys()):
+                                                tcl2_total = sum(hierarchy[tcl1][tcl2].values())
+                                                
+                                                # Write TCL2 (Level 2 - Single indent)
+                                                ws_region.cell(row=current_row, column=1, value=f'  {tcl2}')
+                                                ws_region.cell(row=current_row, column=2, value=tcl2_total)
+                                                ws_region.cell(row=current_row, column=1).font = level2_font
+                                                ws_region.cell(row=current_row, column=2).font = level2_font
+                                                ws_region.cell(row=current_row, column=2).alignment = right_align
+                                                current_row += 1
+                                                
+                                                for tcl3 in sorted(hierarchy[tcl1][tcl2].keys()):
+                                                    tcl3_count = hierarchy[tcl1][tcl2][tcl3]
+                                                    
+                                                    # Write TCL3 (Level 3 - Double indent)
+                                                    ws_region.cell(row=current_row, column=1, value=f'    {tcl3}')
+                                                    ws_region.cell(row=current_row, column=2, value=tcl3_count)
+                                                    ws_region.cell(row=current_row, column=1).font = level3_font
+                                                    ws_region.cell(row=current_row, column=2).font = level3_font
+                                                    ws_region.cell(row=current_row, column=2).alignment = right_align
+                                                    current_row += 1
+                                            
+                                            grand_total += tcl1_total
+                                        
+                                        # Write Grand Total
+                                        ws_region.cell(row=current_row, column=1, value='Grand Total')
+                                        ws_region.cell(row=current_row, column=2, value=grand_total)
+                                        ws_region.cell(row=current_row, column=1).font = Font(bold=True, size=10)
+                                        ws_region.cell(row=current_row, column=2).font = Font(bold=True, size=10)
+                                        ws_region.cell(row=current_row, column=2).alignment = right_align
+                                        ws_region.cell(row=current_row, column=1).border = Border(top=Side(style='thin', color='000000'))
+                                        ws_region.cell(row=current_row, column=2).border = Border(top=Side(style='thin', color='000000'))
+                                    
+                                    # Auto-adjust column widths
+                                    ws_region.column_dimensions['A'].width = 60
+                                    ws_region.column_dimensions['B'].width = 18
+                        
+                        # Sheet 5: Do not exist in DB (records with blank TCL1)
+                        unresolved_df = df[df['tcl1_desc'].isna() | (df['tcl1_desc'] == '')].copy()
+                        if not unresolved_df.empty:
+                            unresolved_df.to_excel(writer, sheet_name='Do not exist in DB', index=False)
+                            ws_unresolved = writer.sheets['Do not exist in DB']
+                            for column in ws_unresolved.columns:
+                                max_length = 0
+                                column_letter = column[0].column_letter
+                                for cell in column:
+                                    try:
+                                        if cell.value and len(str(cell.value)) > max_length:
+                                            max_length = len(str(cell.value))
+                                    except:
+                                        pass
+                                ws_unresolved.column_dimensions[column_letter].width = max_length + 2
+                        
+                        # Sheet 6: Details (full list of AT securities)
+                        df.to_excel(writer, sheet_name='Details', index=False)
+                        ws_details = writer.sheets['Details']
+                        for column in ws_details.columns:
+                            max_length = 0
+                            column_letter = column[0].column_letter
+                            for cell in column:
+                                try:
+                                    if cell.value and len(str(cell.value)) > max_length:
+                                        max_length = len(str(cell.value))
+                                except:
+                                    pass
+                            ws_details.column_dimensions[column_letter].width = max_length + 2
+                
+                elif cache_key == 'requirement_3':
+                    # Requirement 3: 4 sheets (Summary, Differences, AT, CCP)
+                    df = results[cache_key]
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        # Sheet 1: Summary Report (Pivot: column headers × exchanges)
+                        pivot_df = results.get('requirement_3_pivot', pd.DataFrame())
+                        if not pivot_df.empty:
+                            pivot_df.to_excel(writer, sheet_name='Summary Report')
+                            ws_summary = writer.sheets['Summary Report']
+                            # Auto-adjust widths
+                            for column in ws_summary.columns:
+                                max_length = 0
+                                column_letter = column[0].column_letter
+                                for cell in column:
+                                    try:
+                                        if cell.value and len(str(cell.value)) > max_length:
+                                            max_length = len(str(cell.value))
+                                    except:
+                                        pass
+                                ws_summary.column_dimensions[column_letter].width = max_length + 2
+                        
+                        # Sheet 2: Differences (symbol, exchange, mismatched_fields)
+                        diff_cols = ['symbol', 'exchange', 'mismatched_fields', 'action']
+                        available_diff = [c for c in diff_cols if c in df.columns]
+                        if available_diff:
+                            df_diffs = df[available_diff].copy()
+                            df_diffs.to_excel(writer, sheet_name='Differences', index=False)
+                            ws_diff = writer.sheets['Differences']
+                            for column in ws_diff.columns:
+                                max_length = 0
+                                column_letter = column[0].column_letter
+                                for cell in column:
+                                    try:
+                                        if cell.value and len(str(cell.value)) > max_length:
+                                            max_length = len(str(cell.value))
+                                    except:
+                                        pass
+                                ws_diff.column_dimensions[column_letter].width = max_length + 2
+                        
+                        # Sheet 3: AT (with at_ prefixed columns)
+                        at_cols = [c for c in df.columns if c.startswith('at_')]
+                        base_cols = [c for c in df.columns if c in ['symbol', 'exchange']]
                         if at_cols or base_cols:
                             df_at = df[base_cols + at_cols].copy()
                             df_at.columns = [c.replace('at_', '') if c.startswith('at_') else c for c in df_at.columns]
                             df_at.to_excel(writer, sheet_name='AT', index=False)
+                            ws_at = writer.sheets['AT']
+                            for column in ws_at.columns:
+                                max_length = 0
+                                column_letter = column[0].column_letter
+                                for cell in column:
+                                    try:
+                                        if cell.value and len(str(cell.value)) > max_length:
+                                            max_length = len(str(cell.value))
+                                    except:
+                                        pass
+                                ws_at.column_dimensions[column_letter].width = max_length + 2
                         
-                        # Write CCP sheet
+                        # Sheet 4: CCP (with ccp_ prefixed columns)
                         ccp_cols = [c for c in df.columns if c.startswith('ccp_')]
-                        if base_cols or ccp_cols:
+                        if ccp_cols or base_cols:
                             df_ccp = df[base_cols + ccp_cols].copy()
                             df_ccp.columns = [c.replace('ccp_', '') if c.startswith('ccp_') else c for c in df_ccp.columns]
                             df_ccp.to_excel(writer, sheet_name='CCP', index=False)
-                        
-                        # Write Diffs sheet
-                        # Write Diffs sheet: only symbol, exchange, mismatched_fields
-                        diff_cols = ['symbol', 'exchange', 'mismatched_fields']
-                        available = [c for c in diff_cols if c in df.columns]
-                        if available:
-                            df_diffs = df[available].copy()
-                            df_diffs.to_excel(writer, sheet_name='Diffs', index=False)
-                    else:
-                        df.to_excel(writer, sheet_name='Results', index=False)
+                            ws_ccp = writer.sheets['CCP']
+                            for column in ws_ccp.columns:
+                                max_length = 0
+                                column_letter = column[0].column_letter
+                                for cell in column:
+                                    try:
+                                        if cell.value and len(str(cell.value)) > max_length:
+                                            max_length = len(str(cell.value))
+                                    except:
+                                        pass
+                                ws_ccp.column_dimensions[column_letter].width = max_length + 2
                 
                 # Add file to ZIP
                 output.seek(0)
@@ -699,13 +1474,28 @@ def download_zip():
 This ZIP file contains all comparison results:
 
 Files included:
-- 00_Comparison_Report.xlsx: Summary report with overall statistics
+- 00_Comparison_Report.xlsx: Comprehensive summary report combining all 3 requirements
+  * In CCP but not in AT: Grouped by product segment
+  * In AT but not in CCP: Grouped by region and product classification
+  * In AT and CCP but with Mismatch: Grouped by configuration type
+
 - 01_Securities_In_CCP_Not_In_AT.xlsx: Securities that exist in CCP but not in AT
+  * Summary Report: Segment-wise breakdown
+  * Details: Full list of securities
+
 - 02_Securities_In_AT_Not_In_CCP.xlsx: Securities that exist in AT but not in CCP
+  * Overall Summary: Regional statistics
+  * Americas: Hierarchical TCL breakdown for Americas region
+  * Asia: Hierarchical TCL breakdown for Asia region
+  * Europe: Hierarchical TCL breakdown for Europe region
+  * Do not exist in DB: Records with missing TCL1 data
+  * Details: Full list of AT securities with DBeaver enrichment
+
 - 03_Securities_Config_Mismatch.xlsx: Securities in both with configuration mismatches
-  - AT Sheet: AT configuration values
-  - CCP Sheet: CCP configuration values
-  - Diffs Sheet: Summary of differences
+  * Summary Report: Column headers × exchanges pivot
+  * Differences: Symbol, exchange, mismatched fields
+  * AT: AT configuration values
+  * CCP: CCP configuration values
 
 Generated: {timestamp}
 """.format(timestamp=results['timestamp'])

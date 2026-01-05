@@ -353,6 +353,8 @@ async function runComparison() {
 // FETCH AND DISPLAY RESULTS
 // ================================
 
+let summaryChart = null;
+
 async function fetchAndDisplayResults() {
     try {
         console.log('✓ Fetching /api/results');
@@ -362,8 +364,8 @@ async function fetchAndDisplayResults() {
         console.log('✓ Results data received:', data);
         
         if (response.ok) {
-            displayStatistics(data.statistics);
-            displaySummaryCards(data.statistics);
+            displayOverallStats(data.statistics);
+            displayRequirementDetails(data);
             showDownloadPanel();
         } else {
             showAlert('error', 'Error fetching results: ' + data.error);
@@ -375,7 +377,306 @@ async function fetchAndDisplayResults() {
 }
 
 // ================================
-// DISPLAY STATISTICS
+// DISPLAY OVERALL STATISTICS WITH CHART
+// ================================
+
+function displayOverallStats(stats) {
+    // Update stat boxes
+    document.getElementById('stat-ccp').textContent = stats.total_ccp.toLocaleString();
+    document.getElementById('stat-at').textContent = stats.total_at.toLocaleString();
+    document.getElementById('stat-common').textContent = stats.total_common.toLocaleString();
+    document.getElementById('stat-action').textContent = stats.total_action_required.toLocaleString();
+    
+    // Create chart
+    const ctx = document.getElementById('summaryChart').getContext('2d');
+    
+    // Destroy existing chart if any
+    if (summaryChart) {
+        summaryChart.destroy();
+    }
+    
+    summaryChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Matched Records', 'Req1: CCP→AT', 'Req2: AT→CCP', 'Req3: Mismatch'],
+            datasets: [{
+                data: [
+                    stats.total_common,
+                    stats.requirement_1_count,
+                    stats.requirement_2_count,
+                    stats.requirement_3_count
+                ],
+                backgroundColor: [
+                    'rgba(34, 197, 94, 0.8)',   // green
+                    'rgba(220, 38, 38, 0.8)',   // red
+                    'rgba(245, 158, 11, 0.8)',  // yellow
+                    'rgba(14, 165, 233, 0.8)'   // blue
+                ],
+                borderColor: [
+                    'rgb(34, 197, 94)',
+                    'rgb(220, 38, 38)',
+                    'rgb(245, 158, 11)',
+                    'rgb(14, 165, 233)'
+                ],
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        padding: 15,
+                        font: {
+                            size: 11
+                        }
+                    }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const label = context.label || '';
+                            const value = context.parsed || 0;
+                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                            const percentage = ((value / total) * 100).toFixed(1);
+                            return `${label}: ${value.toLocaleString()} (${percentage}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    document.getElementById('overallStats').style.display = 'block';
+}
+
+// ================================
+// DISPLAY REQUIREMENT DETAILS
+// ================================
+
+function displayRequirementDetails(data) {
+    const stats = data.statistics;
+    
+    // Update requirement counts
+    document.getElementById('req1-count').textContent = stats.requirement_1_count.toLocaleString();
+    document.getElementById('req2-count').textContent = stats.requirement_2_count.toLocaleString();
+    document.getElementById('req3-count').textContent = stats.requirement_3_count.toLocaleString();
+    
+    // Log summary data for debugging
+    console.log('Req1 summary:', data.requirement_1.summary);
+    console.log('Req2 summary:', data.requirement_2.summary);
+    console.log('Req3 summary:', data.requirement_3.summary);
+    
+    // Display summary tables
+    displayReq1Summary(data.requirement_1.summary);
+    displayReq2Summary(data.requirement_2.summary);
+    displayReq3Summary(data.requirement_3.summary);
+    
+    document.getElementById('requirementDetails').style.display = 'block';
+}
+
+function displayReq1Summary(summaryData) {
+    const table = document.getElementById('req1-summary-table');
+    
+    console.log('displayReq1Summary called with:', summaryData);
+    
+    if (!summaryData || summaryData.length === 0) {
+        table.innerHTML = '<thead class="table-light"><tr><th colspan="2" class="text-center">No summary data available</th></tr></thead><tbody></tbody>';
+        return;
+    }
+    
+    // Req1 Summary: Segment Name | CCP # Securities
+    let html = '<thead class="table-light"><tr>';
+    html += '<th>Segment Name</th>';
+    html += '<th class="text-end">CCP # Securities</th>';
+    html += '</tr></thead><tbody>';
+    
+    summaryData.forEach(row => {
+        const segmentName = row['Segment Name'] || row['segment_name'] || '';
+        const ccpCount = row['CCP # Securities'] || row['ccp_securities'] || '';
+        const isTotal = String(segmentName).toLowerCase().includes('total');
+        
+        html += `<tr${isTotal ? ' class="table-secondary fw-bold"' : ''}>`;
+        html += `<td>${segmentName}</td>`;
+        html += `<td class="text-end">${ccpCount}</td>`;
+        html += '</tr>';
+    });
+    
+    html += '</tbody>';
+    table.innerHTML = html;
+}
+
+function displayReq2Summary(summaryData) {
+    const table = document.getElementById('req2-summary-table');
+    
+    console.log('displayReq2Summary called with:', summaryData);
+    
+    if (!summaryData || summaryData.length === 0) {
+        table.innerHTML = '<thead class="table-light"><tr><th colspan="4" class="text-center">No summary data available</th></tr></thead><tbody></tbody>';
+        return;
+    }
+    
+    // Req2 Summary: Region | Total Records | Comparable Records | Uncomparable Records
+    let html = '<thead class="table-light"><tr>';
+    html += '<th>Region</th>';
+    html += '<th class="text-end">Total Records</th>';
+    html += '<th class="text-end">Comparable Records</th>';
+    html += '<th class="text-end">Uncomparable Records</th>';
+    html += '</tr></thead><tbody>';
+    
+    summaryData.forEach(row => {
+        const region = row['Region'] || row['region'] || '';
+        const totalRecords = row['In AT not CCP'] || row['in_at_not_ccp'] || '';
+        const comparableRecords = row['Exist in Product DB'] || row['exist_in_product_db'] || '';
+        const uncomparableRecords = row['Do not exist in DB'] || row['do_not_exist_in_db'] || '';
+        const isTotal = String(region).toLowerCase().includes('total');
+        
+        html += `<tr${isTotal ? ' class="table-secondary fw-bold"' : ''}>`;
+        html += `<td>${region}</td>`;
+        html += `<td class="text-end">${totalRecords}</td>`;
+        html += `<td class="text-end">${comparableRecords}</td>`;
+        html += `<td class="text-end">${uncomparableRecords}</td>`;
+        html += '</tr>';
+    });
+    
+    html += '</tbody>';
+    table.innerHTML = html;
+}
+
+function displayReq3Summary(summaryData) {
+    const table = document.getElementById('req3-summary-table');
+    
+    console.log('displayReq3Summary called with:', summaryData);
+    
+    if (!summaryData || summaryData.length === 0) {
+        table.innerHTML = '<thead class="table-light"><tr><th colspan="2" class="text-center">No summary data available</th></tr></thead><tbody></tbody>';
+        return;
+    }
+    
+    // Req3 Summary: Pivot table with column headers as rows and exchanges as columns
+    // First, extract all unique exchanges/columns
+    const firstRow = summaryData[0];
+    const columns = Object.keys(firstRow);
+    
+    // Assuming first column is the row label (Column Header)
+    const rowLabelKey = columns[0];
+    const exchangeColumns = columns.slice(1); // Rest are exchanges
+    
+    let html = '<thead class="table-light"><tr>';
+    html += `<th>${rowLabelKey}</th>`;
+    exchangeColumns.forEach(col => {
+        html += `<th class="text-end">${col}</th>`;
+    });
+    html += '</tr></thead><tbody>';
+    
+    summaryData.forEach(row => {
+        const rowLabel = row[rowLabelKey] || '';
+        const isTotal = String(rowLabel).toLowerCase().includes('total');
+        
+        html += `<tr${isTotal ? ' class="table-secondary fw-bold"' : ''}>`;
+        html += `<td>${rowLabel}</td>`;
+        
+        exchangeColumns.forEach(col => {
+            const value = row[col] !== null && row[col] !== undefined ? row[col] : '';
+            html += `<td class="text-end">${value}</td>`;
+        });
+        
+        html += '</tr>';
+    });
+    
+    html += '</tbody>';
+    table.innerHTML = html;
+}
+
+function displayReq1Segments(req1Data) {
+    const segmentList = document.getElementById('req1-segment-list');
+    
+    if (!req1Data || !req1Data.data || req1Data.data.length === 0) {
+        segmentList.innerHTML = '<div class="text-muted small">No data available</div>';
+        return;
+    }
+    
+    // Count by segment (look for segment-related columns)
+    const segments = {};
+    req1Data.data.forEach(row => {
+        const segment = row.segment_name || 'Unknown';
+        segments[segment] = (segments[segment] || 0) + 1;
+    });
+    
+    let html = '';
+    Object.entries(segments).sort((a, b) => b[1] - a[1]).slice(0, 5).forEach(([segment, count]) => {
+        html += `<div class="d-flex justify-content-between mb-1">
+            <span>${segment}</span>
+            <strong>${count}</strong>
+        </div>`;
+    });
+    
+    segmentList.innerHTML = html || '<div class="text-muted small">No segment data</div>';
+}
+
+function displayReq2Regions(req2Data) {
+    const regionList = document.getElementById('req2-region-list');
+    
+    if (!req2Data || !req2Data.data || req2Data.data.length === 0) {
+        regionList.innerHTML = '<div class="text-muted small">No data available</div>';
+        return;
+    }
+    
+    // Count by exchange/region
+    const regions = {};
+    req2Data.data.forEach(row => {
+        const exchange = row.exchange || 'Unknown';
+        regions[exchange] = (regions[exchange] || 0) + 1;
+    });
+    
+    let html = '';
+    Object.entries(regions).sort((a, b) => b[1] - a[1]).forEach(([exchange, count]) => {
+        html += `<div class="d-flex justify-content-between mb-1">
+            <span>${exchange}</span>
+            <strong>${count}</strong>
+        </div>`;
+    });
+    
+    regionList.innerHTML = html || '<div class="text-muted small">No region data</div>';
+}
+
+function displayReq3Mismatches(req3Data) {
+    const fieldList = document.getElementById('req3-field-list');
+    
+    if (!req3Data || !req3Data.data || req3Data.data.length === 0) {
+        fieldList.innerHTML = '<div class="text-muted small">No data available</div>';
+        return;
+    }
+    
+    // Count mismatched fields
+    const fields = {};
+    req3Data.data.forEach(row => {
+        const mismatchFields = row.mismatched_fields || '';
+        if (mismatchFields) {
+            mismatchFields.split(',').forEach(field => {
+                const trimmed = field.trim();
+                if (trimmed) {
+                    fields[trimmed] = (fields[trimmed] || 0) + 1;
+                }
+            });
+        }
+    });
+    
+    let html = '';
+    Object.entries(fields).sort((a, b) => b[1] - a[1]).slice(0, 5).forEach(([field, count]) => {
+        html += `<div class="d-flex justify-content-between mb-1">
+            <span class="text-truncate" style="max-width: 150px;">${field}</span>
+            <strong>${count}</strong>
+        </div>`;
+    });
+    
+    fieldList.innerHTML = html || '<div class="text-muted small">No mismatch data</div>';
+}
+
+// ================================
+// DISPLAY STATISTICS (Legacy - keeping for compatibility)
 // ================================
 
 function displayStatistics(stats) {
@@ -383,12 +684,10 @@ function displayStatistics(stats) {
     document.getElementById('stat-at').textContent = stats.total_at.toLocaleString();
     document.getElementById('stat-common').textContent = stats.total_common.toLocaleString();
     document.getElementById('stat-action').textContent = stats.total_action_required.toLocaleString();
-    
-    document.getElementById('statisticsDashboard').style.display = 'block';
 }
 
 // ================================
-// DISPLAY SUMMARY CARDS
+// DISPLAY SUMMARY CARDS (Legacy - keeping for compatibility)
 // ================================
 
 function displaySummaryCards(stats) {
