@@ -555,15 +555,17 @@ def download_results(requirement):
                     
                     region_product_counts = {}
                     if not req2_df.empty and 'tcl1_desc' in req2_df.columns:
+                        from mappings.segment_mapping import is_etp as check_is_etp
+                        
                         for _, row in req2_df.iterrows():
                             region = get_region_for_exchange(row.get('exchange', ''))
                             if region:
                                 region_display = 'Americas' if region == 'US' else ('Europe' if region == 'EUROPE' else 'Asia')
-                                tcl1 = str(row.get('tcl1_desc', '')).strip().upper()
+                                tcl1_value = row.get('tcl1_desc', '')
                                 
-                                # Classify as Equity or ETP
-                                is_etp = any(keyword in tcl1 for keyword in ['ETP', 'ETF', 'ETN', 'FUND']) if tcl1 else False
-                                product_type = 'ETPs' if is_etp else 'Equities'
+                                # Classify as Equity or ETP using proper function
+                                is_etp_flag = check_is_etp(tcl1_value)
+                                product_type = 'ETPs' if is_etp_flag else 'Equities'
                                 
                                 key = (region_display, product_type)
                                 region_product_counts[key] = region_product_counts.get(key, 0) + 1
@@ -1103,15 +1105,17 @@ def download_zip():
                             
                             region_product_counts = {}
                             if not req2_df.empty and 'tcl1_desc' in req2_df.columns:
+                                from mappings.segment_mapping import is_etp as check_is_etp
+                                
                                 for _, row in req2_df.iterrows():
                                     region = get_region_for_exchange(row.get('exchange', ''))
                                     if region:
                                         region_display = 'Americas' if region == 'US' else ('Europe' if region == 'EUROPE' else 'Asia')
-                                        tcl1 = str(row.get('tcl1_desc', '')).strip().upper()
+                                        tcl1_value = row.get('tcl1_desc', '')
                                         
-                                        # Classify as Equity or ETP
-                                        is_etp = any(keyword in tcl1 for keyword in ['ETP', 'ETF', 'ETN', 'FUND']) if tcl1 else False
-                                        product_type = 'ETPs' if is_etp else 'Equities'
+                                        # Classify as Equity or ETP using proper function
+                                        is_etp_flag = check_is_etp(tcl1_value)
+                                        product_type = 'ETPs' if is_etp_flag else 'Equities'
                                         
                                         key = (region_display, product_type)
                                         region_product_counts[key] = region_product_counts.get(key, 0) + 1
