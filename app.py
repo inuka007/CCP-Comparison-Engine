@@ -509,6 +509,7 @@ def download_results(requirement):
                         'European Equity': ''
                     }
                     
+                    section1_total = 0
                     for _, row in req1_pivot.iterrows():
                         segment_name = row.get('Segment Name', '')
                         count = row.get('CCP # Securities', 0)
@@ -518,7 +519,15 @@ def download_results(requirement):
                             ws.cell(row=current_row, column=1, value=int(count))
                             ws.cell(row=current_row, column=2, value=display_name)
                             ws.cell(row=current_row, column=3, value=comments_map.get(display_name, ''))
+                            section1_total += int(count)
                             current_row += 1
+                    
+                    # Add total row
+                    ws.cell(row=current_row, column=1, value=section1_total)
+                    ws.cell(row=current_row, column=2, value='Total Securities')
+                    ws.cell(row=current_row, column=1).font = Font(bold=True)
+                    ws.cell(row=current_row, column=2).font = Font(bold=True)
+                    current_row += 1
                 
                 current_row += 1  # Blank row
                 
@@ -577,6 +586,7 @@ def download_results(requirement):
                                             "activity to discuss treatment (clients to be unwound ? securities to be added to CCP "
                                             "as an exception)")
                     
+                    section2_total = 0
                     for region, product, display_name in region_product_order:
                         count = region_product_counts.get((region, product), 0)
                         ws.cell(row=current_row, column=1, value=count)
@@ -586,7 +596,15 @@ def download_results(requirement):
                         if region == 'Americas' and product == 'ETPs':
                             ws.cell(row=current_row, column=3, value=americas_etps_comment)
                         
+                        section2_total += count
                         current_row += 1
+                    
+                    # Add total row
+                    ws.cell(row=current_row, column=1, value=section2_total)
+                    ws.cell(row=current_row, column=2, value='Total Securities')
+                    ws.cell(row=current_row, column=1).font = Font(bold=True)
+                    ws.cell(row=current_row, column=2).font = Font(bold=True)
+                    current_row += 1
                 
                 # Add assumption note
                 ws.merge_cells(f'A{current_row}:C{current_row}')
@@ -616,6 +634,7 @@ def download_results(requirement):
                     config_comment = ("Update AT or CCP configuration accordingly to match (across whole market). If "
                                      "configuration is required in CCP for a subset of securities, exceptions to be created.")
                     
+                    section3_total = 0
                     for idx, (config_name, row) in enumerate(config_types.iterrows()):
                         total_count = int(row['Total'])
                         
@@ -626,7 +645,15 @@ def download_results(requirement):
                         if idx == 1:
                             ws.cell(row=current_row, column=3, value=config_comment)
                         
+                        section3_total += total_count
                         current_row += 1
+                    
+                    # Add total row
+                    ws.cell(row=current_row, column=1, value=section3_total)
+                    ws.cell(row=current_row, column=2, value='Total Securities')
+                    ws.cell(row=current_row, column=1).font = Font(bold=True)
+                    ws.cell(row=current_row, column=2).font = Font(bold=True)
+                    current_row += 1
                 
                 # Adjust column widths
                 ws.column_dimensions['A'].width = 10
@@ -1059,6 +1086,7 @@ def download_zip():
                                 'European Equity': ''
                             }
                             
+                            section1_total = 0
                             for _, row in req1_pivot.iterrows():
                                 segment_name = row.get('Segment Name', '')
                                 count = row.get('CCP # Securities', 0)
@@ -1068,7 +1096,15 @@ def download_zip():
                                     ws.cell(row=current_row, column=1, value=int(count))
                                     ws.cell(row=current_row, column=2, value=display_name)
                                     ws.cell(row=current_row, column=3, value=comments_map.get(display_name, ''))
+                                    section1_total += int(count)
                                     current_row += 1
+                            
+                            # Add total row
+                            ws.cell(row=current_row, column=1, value=section1_total)
+                            ws.cell(row=current_row, column=2, value='Total Securities')
+                            ws.cell(row=current_row, column=1).font = Font(bold=True)
+                            ws.cell(row=current_row, column=2).font = Font(bold=True)
+                            current_row += 1
                         
                         current_row += 1  # Blank row
                         
@@ -1127,6 +1163,7 @@ def download_zip():
                                                     "activity to discuss treatment (clients to be unwound ? securities to be added to CCP "
                                                     "as an exception)")
                             
+                            section2_total = 0
                             for region, product, display_name in region_product_order:
                                 count = region_product_counts.get((region, product), 0)
                                 ws.cell(row=current_row, column=1, value=count)
@@ -1136,7 +1173,15 @@ def download_zip():
                                 if region == 'Americas' and product == 'ETPs':
                                     ws.cell(row=current_row, column=3, value=americas_etps_comment)
                                 
+                                section2_total += count
                                 current_row += 1
+                            
+                            # Add total row
+                            ws.cell(row=current_row, column=1, value=section2_total)
+                            ws.cell(row=current_row, column=2, value='Total Securities')
+                            ws.cell(row=current_row, column=1).font = Font(bold=True)
+                            ws.cell(row=current_row, column=2).font = Font(bold=True)
+                            current_row += 1
                         
                         # Add assumption note
                         ws.merge_cells(f'A{current_row}:C{current_row}')
@@ -1166,6 +1211,7 @@ def download_zip():
                             config_comment = ("Update AT or CCP configuration accordingly to match (across whole market). If "
                                              "configuration is required in CCP for a subset of securities, exceptions to be created.")
                             
+                            section3_total = 0
                             for idx, (config_name, row) in enumerate(config_types.iterrows()):
                                 total_count = int(row['Total'])
                                 
@@ -1176,7 +1222,15 @@ def download_zip():
                                 if idx == 1:
                                     ws.cell(row=current_row, column=3, value=config_comment)
                                 
+                                section3_total += total_count
                                 current_row += 1
+                            
+                            # Add total row
+                            ws.cell(row=current_row, column=1, value=section3_total)
+                            ws.cell(row=current_row, column=2, value='Total Securities')
+                            ws.cell(row=current_row, column=1).font = Font(bold=True)
+                            ws.cell(row=current_row, column=2).font = Font(bold=True)
+                            current_row += 1
                         
                         # Adjust column widths
                         ws.column_dimensions['A'].width = 10
