@@ -258,15 +258,39 @@ class RequirementsAnalyzer:
         Mappings:
         - TRUE = YES (case-insensitive)
         - FALSE = NO (case-insensitive)
-        - Numeric values (including 0, 1, etc.) are compared as exact numeric/string values
+        - 0 = NULL/empty (null/NaN/None/empty string and 0 are treated as equal)
+        - Numeric values are compared as exact numeric/string values
         - NaN/None are treated as equal to each other
         """
         # Handle NaN/None cases
-        ccp_is_na = pd.isna(ccp_val)
-        at_is_na = pd.isna(at_val)
+        ccp_is_na = pd.isna(ccp_val) or (isinstance(ccp_val, str) and ccp_val.strip() == '')
+        at_is_na = pd.isna(at_val) or (isinstance(at_val, str) and at_val.strip() == '')
         
-        if ccp_is_na and at_is_na:
-            return True
+        # Treat 0 as equivalent to NULL/empty
+        ccp_is_zero = False
+        at_is_zero = False
+        
+        try:
+            if not ccp_is_na and (float(ccp_val) == 0 or str(ccp_val).strip() == '0'):
+                ccp_is_zero = True
+        except (ValueError, TypeError):
+            pass
+        
+        try:
+            if not at_is_na and (float(at_val) == 0 or str(at_val).strip() == '0'):
+                at_is_zero = True
+        except (ValueError, TypeError):
+            pass
+        
+        # If either value is NULL/empty or 0, check if the other is also NULL/empty or 0
+        if ccp_is_na or ccp_is_zero:
+            if at_is_na or at_is_zero:
+                return True
+        if at_is_na or at_is_zero:
+            if ccp_is_na or ccp_is_zero:
+                return True
+        
+        # Both have actual values, proceed with normal comparison
         if ccp_is_na or at_is_na:
             return False
         

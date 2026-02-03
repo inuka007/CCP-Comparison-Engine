@@ -31,9 +31,8 @@ COLUMN_MAPPINGS = {
     'status': '',
     'tradability': '',
     'mic_code_y': '',
-    "min_qty_alwd_for_auto_cls_scheduler": "",
     'minimum_order_value': 'minimum_order_value',
-    'minimum_order_quantity': 'minimum_quantity',
+    'minimum_quantity': 'minimum_quantity',
     'minimum_ticker_price': 'min_ticker_price',
     'maximum_price_diff_preev_cls': '',
     'maximum_price_diff_other_prices': '',
@@ -41,7 +40,6 @@ COLUMN_MAPPINGS = {
     'buy_restricted': '',
     'sell_restricted': '',
     'maximum_notional': 'max_notional',
-    'maximum_quantity': 'minimum_quantity',
     'maximum_single_moo_pool_quantity': 'max_single_moo_pool_qty',
     'accumulate_fractional_moo_order': 'accumulate_fractional_moo_order',
     'combine_buy_sell_moo_pool_order': 'combine_buy/sell_moo_pool_order',
@@ -54,13 +52,16 @@ COLUMN_MAPPINGS = {
     'maximum_pool_loss_percent': 'max_pool_loss_%',
     'minimum_auto_close_quantity': 'min_auto_close_qty',
     'maximum_market_value_allowed_in_pool': 'max_market_value_allowed_in_pool',
-    'allow_auto_close_limit': 'allow_auto_close_whole_qty_pool',
+    'allow_auto_close_limit': '',
     'allow_auto_close_whole_quantity_in_pool': 'allow_auto_close_whole_qty_pool',
     'allow_auto_close_whole_quantity_in_pool_scheduler': 'allow_auto_close_whole_qty_in_pool_scheduler',
     'minimum_quantity_for_additional_price_percent': 'minimum_qty_for_additional_price_%',
     'additional_price_percent': 'additional_price_%',
+    'buy_ord_markup': 'buy_order_mark_up',
+    'sell_ord_markup': 'sell_order_mark_up',
     'redis_price_enabled': 'enable_redis_price_sources',
     'price_bracket_enabled': 'price_bracket_enabled',
+    'notional_order_price_bracket': 'notional_order_price_bracket'
 }
 
 EXCLUDE_COLUMNS = ['composite_key', 'updated_date', 'created_by', 'institution', 'updated_by', 'last_updated']
