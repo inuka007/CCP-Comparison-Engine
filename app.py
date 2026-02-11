@@ -514,6 +514,10 @@ def download_results(requirement):
                         segment_name = row.get('Segment Name', '')
                         count = row.get('CCP # Securities', 0)
                         
+                        # Skip the Total row if it exists in the dataframe
+                        if segment_name == 'Total # Securities':
+                            continue
+                        
                         if count > 0:
                             display_name = segment_map.get(segment_name, segment_name)
                             ws.cell(row=current_row, column=1, value=int(count))
@@ -1090,6 +1094,10 @@ def download_zip():
                             for _, row in req1_pivot.iterrows():
                                 segment_name = row.get('Segment Name', '')
                                 count = row.get('CCP # Securities', 0)
+                                
+                                # Skip the Total row if it exists in the dataframe
+                                if segment_name == 'Total # Securities':
+                                    continue
                                 
                                 if count > 0:
                                     display_name = segment_map.get(segment_name, segment_name)
