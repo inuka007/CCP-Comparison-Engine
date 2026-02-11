@@ -162,6 +162,8 @@ class RequirementsAnalyzer:
         requirement_3_list = []
         common_keys = ccp_keys & at_keys
         
+        logger.info(f"Common keys for Requirement 3: {len(common_keys)}")
+        
         # Get excluded columns
         at_exclude_cols = get_excluded_columns()
         at_exclude_cols.update({self.at_symbol_col, 'exchange', 'composite_key'})
@@ -169,18 +171,31 @@ class RequirementsAnalyzer:
         # Get mapped columns for comparison
         mapped_cols = get_mapped_columns()
         
-        # Build lookup dictionaries for fast access
-        ccp_by_key = {
-            key: self.ccp_combined[self.ccp_combined["composite_key"] == key].iloc[0] 
-            for key in common_keys
-        }
-        at_by_key = {
-            key: self.at[self.at["composite_key"] == key].iloc[0] 
-            for key in common_keys
-        }
+        # Build lookup dictionaries for fast access - only for keys that actually exist in both datasets
+        ccp_by_key = {}
+        at_by_key = {}
+        
+        for key in common_keys:
+            # Verify the key exists in both datasets before adding to lookup
+            ccp_matches = self.ccp_combined[self.ccp_combined["composite_key"] == key]
+            at_matches = self.at[self.at["composite_key"] == key]
+            
+            if len(ccp_matches) > 0 and len(at_matches) > 0:
+                ccp_by_key[key] = ccp_matches.iloc[0]
+                at_by_key[key] = at_matches.iloc[0]
+            else:
+                # This key doesn't actually exist in both - log it
+                if len(ccp_matches) == 0:
+                    logger.warning(f"Key {key} in common_keys but not found in CCP dataset")
+                if len(at_matches) == 0:
+                    logger.warning(f"Key {key} in common_keys but not found in AT dataset")
+        
+        # Only compare keys that were successfully found in both datasets
+        valid_common_keys = set(ccp_by_key.keys()) & set(at_by_key.keys())
+        logger.info(f"Valid common keys after verification: {len(valid_common_keys)}")
         
         # Compare each common record
-        for key in common_keys:
+        for key in valid_common_keys:
             ccp_row = ccp_by_key[key]
             at_row = at_by_key[key]
             
@@ -256,76 +271,73 @@ class RequirementsAnalyzer:
         Compare two values with proper type handling
         
         Mappings:
-        - TRUE = YES (case-insensitive)
-        - FALSE = NO (case-insensitive)
+        - TRUE/True/true = YES/Yes/yes = 1 (case-insensitive)
+        - FALSE/False/false = NO/No/no = 0 (case-insensitive)
         - 0 = NULL/empty (null/NaN/None/empty string and 0 are treated as equal)
-        - Numeric values are compared as exact numeric/string values
+        - Numeric values are compared after normalization
         - NaN/None are treated as equal to each other
         """
         # Handle NaN/None cases
         ccp_is_na = pd.isna(ccp_val) or (isinstance(ccp_val, str) and ccp_val.strip() == '')
         at_is_na = pd.isna(at_val) or (isinstance(at_val, str) and at_val.strip() == '')
         
-        # Treat 0 as equivalent to NULL/empty
-        ccp_is_zero = False
-        at_is_zero = False
+        # Both NaN/empty - they match
+        if ccp_is_na and at_is_na:
+            return True
         
-        try:
-            if not ccp_is_na and (float(ccp_val) == 0 or str(ccp_val).strip() == '0'):
-                ccp_is_zero = True
-        except (ValueError, TypeError):
-            pass
-        
-        try:
-            if not at_is_na and (float(at_val) == 0 or str(at_val).strip() == '0'):
-                at_is_zero = True
-        except (ValueError, TypeError):
-            pass
-        
-        # If either value is NULL/empty or 0, check if the other is also NULL/empty or 0
-        if ccp_is_na or ccp_is_zero:
-            if at_is_na or at_is_zero:
-                return True
-        if at_is_na or at_is_zero:
-            if ccp_is_na or ccp_is_zero:
-                return True
-        
-        # Both have actual values, proceed with normal comparison
+        # One is NaN, one is not - normalize and compare
         if ccp_is_na or at_is_na:
+            # Normalize both values
+            ccp_normalized = self._normalize_value(ccp_val)
+            at_normalized = self._normalize_value(at_val)
+            # If one is NA and normalizes to '0' or 'FALSE', and the other normalizes to '0' or 'FALSE', they match
+            if (ccp_normalized in ['0', 'FALSE'] and at_normalized in ['0', 'FALSE']):
+                return True
             return False
         
-        # Convert to strings for comparison
-        ccp_str = str(ccp_val).strip().upper()
-        at_str = str(at_val).strip().upper()
-        
-        # Apply boolean text mappings only for explicit text boolean values
-        # TRUE should equal YES, FALSE should equal NO
-        ccp_normalized = self._normalize_boolean_text(ccp_str)
-        at_normalized = self._normalize_boolean_text(at_str)
+        # Both have actual values - normalize and compare
+        ccp_normalized = self._normalize_value(ccp_val)
+        at_normalized = self._normalize_value(at_val)
         
         # Compare normalized values
         return ccp_normalized == at_normalized
     
-    def _normalize_boolean_text(self, val_str):
+    def _normalize_value(self, val):
         """
-        Normalize only explicit boolean text values
+        Normalize values for comparison
         
-        TRUE -> TRUE
-        YES -> TRUE
-        FALSE -> FALSE
-        NO -> FALSE
-        Everything else (including 0, 1, numeric values) -> returned as-is
+        Boolean mappings (case-insensitive):
+        - TRUE/True/true = YES/Yes/yes = 1 -> normalized to 'TRUE'
+        - FALSE/False/false = NO/No/no = 0 -> normalized to 'FALSE'
+        
+        Numeric values are converted to strings for comparison
+        Empty/NaN/None -> '0' or 'FALSE'
         """
-        if val_str == 'TRUE':
-            return 'TRUE'
-        elif val_str == 'YES':
-            return 'TRUE'
-        elif val_str == 'FALSE':
+        # Handle NaN/None/empty
+        if pd.isna(val) or (isinstance(val, str) and val.strip() == ''):
             return 'FALSE'
-        elif val_str == 'NO':
+        
+        # Convert to string and normalize
+        val_str = str(val).strip()
+        val_upper = val_str.upper()
+        
+        # Boolean text mappings (TRUE/YES/1 -> TRUE, FALSE/NO/0 -> FALSE)
+        if val_upper in ['TRUE', 'YES', '1', '1.0']:
+            return 'TRUE'
+        elif val_upper in ['FALSE', 'NO', '0', '0.0']:
             return 'FALSE'
-        else:
-            # Return numeric and other values as-is
+        
+        # For numeric values, try to normalize format
+        try:
+            # Try to convert to float then back to string to normalize (e.g., 1.0 -> 1.0)
+            num_val = float(val_str)
+            # Check if it's effectively an integer
+            if num_val == int(num_val):
+                return str(int(num_val))
+            else:
+                return str(num_val)
+        except (ValueError, TypeError):
+            # Not a number, return as-is (uppercase for text comparison)
             return val_str
     
     def _build_requirement_3_record(self, ccp_row, at_row, mismatched_fields):
