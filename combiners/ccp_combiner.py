@@ -57,12 +57,28 @@ class CCPCombiner:
         
         Uses 'exchange' as the merge key with many-to-one relationship
         (many securities per exchange, one rule set per exchange)
+        
+        Handles duplicate exchange entries in Market Rules by keeping first occurrence
         """
         logger.info("Merging CCP Security Whitelist with CCP Market Rules...")
         
+        # Check for duplicate exchanges in Market Rules
+        if 'exchange' in self.ccp_rules.columns:
+            duplicates = self.ccp_rules['exchange'].duplicated().sum()
+            if duplicates > 0:
+                logger.warning(f"Found {duplicates} duplicate exchange entries in CCP Market Rules")
+                logger.info("Keeping first occurrence of each exchange")
+                # Keep only the first occurrence of each exchange
+                ccp_rules_unique = self.ccp_rules.drop_duplicates(subset=['exchange'], keep='first')
+                logger.info(f"Reduced Market Rules from {len(self.ccp_rules)} to {len(ccp_rules_unique)} rows")
+            else:
+                ccp_rules_unique = self.ccp_rules
+        else:
+            ccp_rules_unique = self.ccp_rules
+        
         self.ccp_combined = pd.merge(
             self.ccp_sec,
-            self.ccp_rules,
+            ccp_rules_unique,
             on="exchange",
             how="left",
             validate="m:1"
