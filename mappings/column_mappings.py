@@ -28,6 +28,7 @@ COLUMN_MAPPINGS = {
     'tcl1': '',
     'tcl2': '',
     'tcl3': '',
+    'segment': '',
     'status': '',
     'tradability': '',
     'mic_code_y': '',

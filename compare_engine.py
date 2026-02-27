@@ -178,8 +178,8 @@ class ComparisonEngine:
     def _validate_columns(self):
         """Validate that required columns exist"""
         required = {
-            'ccp_sec': ['exchange'],
-            'ccp_rules': ['exchange'],
+            'ccp_sec': ['exchange', 'segment'],
+            'ccp_rules': ['exchange', 'segment'],
             'at': ['exchange']
         }
         
@@ -235,6 +235,8 @@ class ComparisonEngine:
         combiner = CCPCombiner(self.ccp_sec, self.ccp_rules)
         combiner.combine()
         self.ccp_combined = combiner.get_combined()
+        # Store raw combined data before alignment (for download/review)
+        self.ccp_combined_raw = self.ccp_combined.copy()
         logger.info("CCP combining delegated to CCPCombiner module")
     
     # ================================

@@ -194,8 +194,29 @@ class RequirementsAnalyzer:
         valid_common_keys = set(ccp_by_key.keys()) & set(at_by_key.keys())
         logger.info(f"Valid common keys after verification: {len(valid_common_keys)}")
         
-        # Compare each common record
+        # Additional validation: Check if securities with same composite key are actually the same security
+        # by comparing ISIN, CUSIP, or other unique identifiers
+        truly_common_keys = set()
+        excluded_keys = []
+        
         for key in valid_common_keys:
+            ccp_row = ccp_by_key[key]
+            at_row = at_by_key[key]
+            
+            # Check if these are truly the same security by comparing identifiers
+            if self._are_same_security(ccp_row, at_row):
+                truly_common_keys.add(key)
+            else:
+                excluded_keys.append(key)
+                symbol = at_row.get(self.at_symbol_col, 'Unknown')
+                exchange = at_row.get('exchange', 'Unknown')
+                logger.info(f"Excluded from Req3: {symbol}|{exchange} - Different ISIN/CUSIP or identifiers")
+        
+        logger.info(f"Truly common keys after identifier validation: {len(truly_common_keys)}")
+        logger.info(f"Excluded keys (different securities with same symbol+exchange): {len(excluded_keys)}")
+        
+        # Compare each common record
+        for key in truly_common_keys:
             ccp_row = ccp_by_key[key]
             at_row = at_by_key[key]
             
@@ -265,6 +286,61 @@ class RequirementsAnalyzer:
                 mismatched_field_names.append(at_col)
         
         return mismatched_field_names
+    
+    def _extract_identifier(self, row, col_names):
+        """
+        Extract an identifier value from a row, trying multiple possible column names.
+        Returns the value as uppercase string, or None if not found/empty.
+        """
+        for col in col_names:
+            if col in row.index:
+                val = row[col]
+                if pd.notna(val) and str(val).strip() != '':
+                    return str(val).strip().upper()
+        return None
+    
+    def _are_same_security(self, ccp_row, at_row):
+        """
+        Verify if two securities with the same symbol+exchange composite key
+        are actually the same security that can be compared for config mismatches.
+        
+        A security is considered NOT comparable (returns False) if it has no CCP Market Rules
+        data, meaning it was an exception inclusion in CCP but has no actual rule configuration.
+        This is detected by checking if all the comparable mapped columns from CCP are NaN/empty.
+        
+        Returns True if they are the same security with CCP rules, False otherwise.
+        """
+        # Get mapped columns that have AT equivalents (these are the ones we compare)
+        mapped_cols = get_mapped_columns()
+        
+        # Check if the CCP row has any actual rule values (non-null, non-empty)
+        # Exclude identifier columns - we only care about configuration columns
+        id_cols = {'symbol', 'exchange', 'composite_key', 'isin', 'cusip', 'security_name',
+                   'currency', 'country_code', 'mic_code', 'bbg_ticker', 'tcl1', 'tcl2', 'tcl3',
+                   'status', 'tradability', 'segment', 'last_updated', 'bloomberg_symbol'}
+        
+        has_any_ccp_rule = False
+        for ccp_col, at_col in mapped_cols:
+            if not at_col or at_col == '':
+                continue
+            # Skip identifier columns
+            if ccp_col.lower() in id_cols or at_col.lower() in id_cols:
+                continue
+            
+            # Check if CCP has a value for this configuration column
+            for col_name in [at_col, ccp_col]:
+                if col_name in ccp_row.index:
+                    val = ccp_row[col_name]
+                    if pd.notna(val) and str(val).strip() != '':
+                        has_any_ccp_rule = True
+                        break
+            if has_any_ccp_rule:
+                break
+        
+        if not has_any_ccp_rule:
+            return False
+        
+        return True
     
     def _values_match(self, ccp_val, at_val):
         """

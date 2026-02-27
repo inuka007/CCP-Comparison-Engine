@@ -295,6 +295,8 @@ def run_comparison():
             'requirement_3': results['requirement_3'],
             'requirement_3_pivot': results.get('requirement_3_pivot'),
             'statistics': results['statistics'],
+            'ccp_combined': engine.ccp_combined_raw.copy(),
+            'at_whitelist': engine.at.copy(),
             'timestamp': datetime.now().isoformat()
         }
         
@@ -999,6 +1001,86 @@ def download_results(requirement):
         return jsonify({
             'success': False,
             'error': f'Error downloading results: {str(e)}',
+            'type': 'download_error'
+        }), 500
+
+# ================================
+# ROUTES - DOWNLOAD CCP COMBINED + AT WHITELIST
+# ================================
+
+@app.route('/api/download/combined', methods=['GET'])
+def download_combined():
+    """Download CCP Combined and AT Whitelist as a single Excel file with 2 sheets"""
+    try:
+        if 'results_id' not in session or session['results_id'] not in RESULTS_CACHE:
+            return jsonify({
+                'success': False,
+                'error': 'No results available. Please run comparison first.',
+                'type': 'no_results'
+            }), 400
+        
+        results = RESULTS_CACHE[session['results_id']]
+        
+        ccp_combined_df = results.get('ccp_combined')
+        at_whitelist_df = results.get('at_whitelist')
+        
+        if ccp_combined_df is None or at_whitelist_df is None:
+            return jsonify({
+                'success': False,
+                'error': 'Combined data not available. Please re-run comparison.',
+                'type': 'no_data'
+            }), 400
+        
+        # Build Excel with 2 sheets
+        output = io.BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Sheet 1: CCP Combined (Security Whitelist + Market Rules)
+            ccp_export = ccp_combined_df.drop(columns=['composite_key'], errors='ignore')
+            ccp_export.to_excel(writer, sheet_name='CCP Combined', index=False)
+            ws_ccp = writer.sheets['CCP Combined']
+            for column in ws_ccp.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if cell.value and len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                ws_ccp.column_dimensions[column_letter].width = min(max_length + 2, 50)
+            
+            # Sheet 2: AT Whitelist
+            at_export = at_whitelist_df.drop(columns=['composite_key'], errors='ignore')
+            at_export.to_excel(writer, sheet_name='AT Whitelist', index=False)
+            ws_at = writer.sheets['AT Whitelist']
+            for column in ws_at.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if cell.value and len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                ws_at.column_dimensions[column_letter].width = min(max_length + 2, 50)
+        
+        output.seek(0)
+        filename = 'CCP_Combined_and_AT_Whitelist.xlsx'
+        logger.info(f"Downloaded {filename}")
+        
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        logger.error(f"Error downloading combined data: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error downloading combined data: {str(e)}',
             'type': 'download_error'
         }), 500
 

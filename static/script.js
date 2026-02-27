@@ -728,7 +728,8 @@ async function downloadResults(requirement) {
                 'req1': '01_Securities_In_CCP_Not_In_AT.xlsx',
                 'req2': '02_Securities_In_AT_Not_In_CCP.xlsx',
                 'req3': '03_Securities_Config_Mismatch.xlsx',
-                'report': '00_Comparison_Report.xlsx'
+                'report': '00_Comparison_Report.xlsx',
+                'combined': 'CCP_Combined_and_AT_Whitelist.xlsx'
             };
             filename = filenameMap[requirement] || 'download.xlsx';
         }
