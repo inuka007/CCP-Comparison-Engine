@@ -366,6 +366,8 @@ async function fetchAndDisplayResults() {
         if (response.ok) {
             displayOverallStats(data.statistics);
             displayRequirementDetails(data);
+            displayCcpDuplicates(data);
+            displayAtDuplicates(data);
             showDownloadPanel();
         } else {
             showAlert('error', 'Error fetching results: ' + data.error);
@@ -676,6 +678,69 @@ function displayReq3Mismatches(req3Data) {
 }
 
 // ================================
+// DISPLAY CCP DUPLICATES TABLE
+// ================================
+
+function displayCcpDuplicates(data) {
+    const section = document.getElementById('ccpDuplicatesSection');
+    const countEl = document.getElementById('duplicates-count');
+    
+    if (!data.ccp_duplicates_count || data.ccp_duplicates_count === 0) {
+        section.style.display = 'none';
+        return;
+    }
+    
+    countEl.textContent = data.ccp_duplicates_count;
+    section.style.display = 'block';
+}
+
+// ================================
+// DISPLAY AT DUPLICATES COUNT
+// ================================
+
+function displayAtDuplicates(data) {
+    const section = document.getElementById('atDuplicatesSection');
+    const countEl = document.getElementById('at-duplicates-count');
+    
+    if (!data.at_duplicates_count || data.at_duplicates_count === 0) {
+        section.style.display = 'none';
+        return;
+    }
+    
+    countEl.textContent = data.at_duplicates_count;
+    section.style.display = 'block';
+}
+
+// ================================
+// DOWNLOAD DUPLICATES EXPORT
+// ================================
+
+async function downloadDuplicates(type) {
+    try {
+        const url = '/api/download/' + type + '-duplicates';
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            const errData = await response.json();
+            showAlert('error', errData.error || 'Error downloading duplicates');
+            return;
+        }
+        
+        const blob = await response.blob();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = type.toUpperCase() + '_Duplicate_Entries.xlsx';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+    } catch (error) {
+        console.error('Error downloading duplicates:', error);
+        showAlert('error', 'Error downloading duplicates: ' + error.message);
+    }
+}
+
+// ================================
 // DISPLAY STATISTICS (Legacy - keeping for compatibility)
 // ================================
 
@@ -802,6 +867,12 @@ async function resetSession() {
             document.getElementById('check1').checked = false;
             document.getElementById('check2').checked = false;
             document.getElementById('check3').checked = false;
+            
+            // Hide duplicates sections
+            const dupSection = document.getElementById('ccpDuplicatesSection');
+            if (dupSection) dupSection.style.display = 'none';
+            const atDupSection = document.getElementById('atDuplicatesSection');
+            if (atDupSection) atDupSection.style.display = 'none';
             
             showAlert('success', 'Session reset. Ready for new upload.');
             

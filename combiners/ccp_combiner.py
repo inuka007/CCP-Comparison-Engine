@@ -29,6 +29,7 @@ class CCPCombiner:
         self.ccp_rules = ccp_rules_df.copy()
         self.ccp_combined = None
         self.ccp_symbol_col = None
+        self.ccp_duplicates = pd.DataFrame()  # Stores detected duplicates before removal
         
     def combine(self):
         """
@@ -38,10 +39,108 @@ class CCPCombiner:
             CCPCombiner: self for method chaining
         """
         self._detect_symbol_column()
+        self._detect_and_remove_duplicates()
         self._normalize_segment_values()
         self._merge_datasets()
         return self
     
+    def _detect_and_remove_duplicates(self):
+        """
+        Detect and remove duplicate symbol/exchange entries in CCP Security Whitelist
+        where one record has EXCEPTION_INCLUSION segment and another has a real segment.
+        
+        Logic:
+        - Group by symbol + exchange
+        - If a group has >1 row AND one of them is EXCEPTION_INCLUSION,
+          remove the EXCEPTION_INCLUSION row and keep the other.
+        - Store removed duplicates for UI display.
+        """
+        if 'segment' not in self.ccp_sec.columns:
+            logger.info("No segment column, skipping duplicate detection")
+            return
+        
+        symbol_col = self.ccp_symbol_col
+        
+        # Normalize for grouping (temporary uppercase copies)
+        sym_upper = self.ccp_sec[symbol_col].astype(str).str.strip().str.upper()
+        exch_upper = self.ccp_sec['exchange'].astype(str).str.strip().str.upper()
+        seg_upper = self.ccp_sec['segment'].astype(str).str.strip().str.upper().str.replace(' ', '_')
+        
+        self.ccp_sec['_group_key'] = sym_upper + '|' + exch_upper
+        self.ccp_sec['_seg_norm'] = seg_upper
+        
+        # Find groups with more than one row
+        group_counts = self.ccp_sec.groupby('_group_key').size()
+        dup_keys = group_counts[group_counts > 1].index.tolist()
+        
+        if not dup_keys:
+            logger.info("No duplicate symbol/exchange entries found in CCP Security Whitelist")
+            self.ccp_sec.drop(columns=['_group_key', '_seg_norm'], inplace=True)
+            return
+        
+        logger.info(f"Found {len(dup_keys)} duplicate symbol/exchange groups in CCP Security Whitelist")
+        
+        rows_to_remove = []
+        duplicate_records = []
+        
+        for key in dup_keys:
+            group = self.ccp_sec[self.ccp_sec['_group_key'] == key]
+            segments_in_group = group['_seg_norm'].tolist()
+            
+            # Check if EXCEPTION_INCLUSION is one of the segments
+            if 'EXCEPTION_INCLUSION' not in segments_in_group:
+                logger.info(f"Duplicate group {key} has no EXCEPTION_INCLUSION, skipping")
+                continue
+            
+            # Get the non-EXCEPTION_INCLUSION rows and the EXCEPTION_INCLUSION rows
+            exc_rows = group[group['_seg_norm'] == 'EXCEPTION_INCLUSION']
+            non_exc_rows = group[group['_seg_norm'] != 'EXCEPTION_INCLUSION']
+            
+            if non_exc_rows.empty:
+                # All duplicates are EXCEPTION_INCLUSION - skip, nothing to prefer
+                logger.info(f"Duplicate group {key} has only EXCEPTION_INCLUSION rows, skipping")
+                continue
+            
+            # Mark EXCEPTION_INCLUSION rows for removal
+            kept_segments = non_exc_rows['segment'].tolist()
+            for idx in exc_rows.index:
+                rows_to_remove.append(idx)
+                symbol = self.ccp_sec.at[idx, symbol_col]
+                exchange = self.ccp_sec.at[idx, 'exchange']
+                exc_segment = self.ccp_sec.at[idx, 'segment']
+                
+                # Store the full row data for export
+                row_data = self.ccp_sec.loc[idx].to_dict()
+                row_data['kept_segment'] = ', '.join(str(s) for s in kept_segments)
+                duplicate_records.append(row_data)
+                
+                logger.info(
+                    f"  Removing duplicate: {symbol}|{exchange} "
+                    f"segment={exc_segment} (keeping {kept_segments})"
+                )
+        
+        # Store duplicates info for UI display
+        if duplicate_records:
+            self.ccp_duplicates = pd.DataFrame(duplicate_records)
+            logger.info(
+                f"Removing {len(rows_to_remove)} EXCEPTION_INCLUSION duplicate rows "
+                f"from CCP Security Whitelist"
+            )
+            self.ccp_sec.drop(index=rows_to_remove, inplace=True)
+            self.ccp_sec.reset_index(drop=True, inplace=True)
+        
+        # Cleanup temp columns
+        self.ccp_sec.drop(columns=['_group_key', '_seg_norm'], inplace=True)
+    
+    def get_duplicates(self):
+        """
+        Get the detected duplicate records that were removed.
+        
+        Returns:
+            pd.DataFrame: DataFrame with all original CCP columns plus kept_segment
+        """
+        return self.ccp_duplicates
+
     def _normalize_segment_values(self):
         """
         Normalize merge key values (exchange, segment, mic_code) in both CCP

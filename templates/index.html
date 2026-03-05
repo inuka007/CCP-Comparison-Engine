@@ -341,6 +341,56 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- CCP Duplicates Section -->
+                <div id="ccpDuplicatesSection" class="mt-4" style="display: none;">
+                    <div class="requirement-card mb-4">
+                        <div class="requirement-header bg-secondary-subtle d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">
+                                <i class="bi bi-exclamation-diamond text-secondary"></i> 
+                                CCP Data Cleanup: Duplicate Entries Removed
+                                <span class="badge bg-secondary ms-2" id="duplicates-count">0</span>
+                            </h6>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="downloadDuplicates('ccp')">
+                                <i class="bi bi-file-earmark-excel"></i> Export to Excel
+                            </button>
+                        </div>
+                        <div class="requirement-body">
+                            <p class="small text-muted mb-0">
+                                <i class="bi bi-info-circle"></i>
+                                Duplicate entries found in <strong>CCP Security Whitelist</strong> where the same symbol/exchange 
+                                exists under both a regular segment and <code>EXCEPTION_INCLUSION</code>. 
+                                The <code>EXCEPTION_INCLUSION</code> record was automatically removed and the regular segment record was kept.
+                                <br><span class="text-warning"><i class="bi bi-exclamation-triangle"></i> This is a known CCP data issue. Export to Excel to see full details including segment and TCL1.</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AT Duplicates Section -->
+                <div id="atDuplicatesSection" class="mt-4" style="display: none;">
+                    <div class="requirement-card mb-4">
+                        <div class="requirement-header bg-secondary-subtle d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0">
+                                <i class="bi bi-exclamation-diamond text-secondary"></i> 
+                                AT Data Cleanup: Duplicate Entries Removed
+                                <span class="badge bg-secondary ms-2" id="at-duplicates-count">0</span>
+                            </h6>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="downloadDuplicates('at')">
+                                <i class="bi bi-file-earmark-excel"></i> Export to Excel
+                            </button>
+                        </div>
+                        <div class="requirement-body">
+                            <p class="small text-muted mb-0">
+                                <i class="bi bi-info-circle"></i>
+                                Duplicate entries found in <strong>AT Whitelist</strong> where the same symbol/exchange 
+                                combination appears more than once with identical data. 
+                                Only the first occurrence is kept; extra duplicate rows are removed.
+                                <br><span class="text-warning"><i class="bi bi-exclamation-triangle"></i> Typically caused by a data export issue on the AT side. Export to Excel to see full details including segment and TCL1.</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

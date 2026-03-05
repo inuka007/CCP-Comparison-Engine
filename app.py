@@ -9,6 +9,7 @@ import logging
 import io
 import uuid
 import zipfile
+import traceback
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file, session
 from werkzeug.utils import secure_filename
@@ -297,12 +298,15 @@ def run_comparison():
             'statistics': results['statistics'],
             'ccp_combined': engine.ccp_combined_raw.copy(),
             'at_whitelist': engine.at.copy(),
+            'ccp_duplicates': engine.ccp_duplicates.copy() if not engine.ccp_duplicates.empty else pd.DataFrame(),
+            'at_duplicates': engine.at_duplicates.copy() if not engine.at_duplicates.empty else pd.DataFrame(),
             'timestamp': datetime.now().isoformat()
         }
         
         logger.info(f"Comparison completed: {results['statistics']}")
         
-        return jsonify({
+        # Build response
+        response_data = {
             'success': True,
             'message': 'Comparison completed successfully',
             'statistics': {k: (int(v) if isinstance(v, (int, float)) else str(v)) 
@@ -312,7 +316,17 @@ def run_comparison():
                 'requirement_2_count': len(results['requirement_2']),
                 'requirement_3_count': len(results['requirement_3'])
             }
-        }), 200
+        }
+        
+        # Include CCP duplicates count if any were found
+        if not engine.ccp_duplicates.empty:
+            response_data['ccp_duplicates_count'] = len(engine.ccp_duplicates)
+        
+        # Include AT duplicates count if any were found
+        if not engine.at_duplicates.empty:
+            response_data['at_duplicates_count'] = len(engine.at_duplicates)
+        
+        return jsonify(response_data), 200
     
     except ValidationError as e:
         logger.error(f"Validation error during comparison: {str(e)}")
@@ -387,8 +401,8 @@ def get_results():
         
         req3_summary = clean_dataframe_for_json(req3_pivot) if not req3_pivot.empty else []
         
-        # Return limited preview (first 100 rows per requirement)
-        return jsonify({
+        # Build response data
+        response_data = {
             'success': True,
             'statistics': {k: (int(v) if isinstance(v, (int, float)) else str(v)) 
                           for k, v in results['statistics'].items()},
@@ -410,7 +424,19 @@ def get_results():
                 'preview': True if len(req3_data) > 100 else False,
                 'summary': req3_summary
             }
-        }), 200
+        }
+        
+        # Include CCP duplicates count if any were found
+        ccp_duplicates = results.get('ccp_duplicates', pd.DataFrame())
+        if not ccp_duplicates.empty:
+            response_data['ccp_duplicates_count'] = len(ccp_duplicates)
+        
+        # Include AT duplicates count if any were found
+        at_duplicates = results.get('at_duplicates', pd.DataFrame())
+        if not at_duplicates.empty:
+            response_data['at_duplicates_count'] = len(at_duplicates)
+        
+        return jsonify(response_data), 200
     
     except Exception as e:
         logger.error(f"Error retrieving results: {str(e)}")
@@ -687,10 +713,12 @@ def download_results(requirement):
         if req_key == 'requirement_3':
             # Requirement 3: 4 sheets (Summary, Differences, AT, CCP)
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                sheets_written = False
                 # Sheet 1: Summary Report (Pivot: column headers × exchanges)
                 pivot_df = results.get('requirement_3_pivot', pd.DataFrame())
                 if not pivot_df.empty:
                     pivot_df.to_excel(writer, sheet_name='Summary Report')
+                    sheets_written = True
                     ws_summary = writer.sheets['Summary Report']
                     # Auto-adjust widths
                     for column in ws_summary.columns:
@@ -710,6 +738,7 @@ def download_results(requirement):
                 if available_diff:
                     df_diffs = df[available_diff].copy()
                     df_diffs.to_excel(writer, sheet_name='Differences', index=False)
+                    sheets_written = True
                     ws_diff = writer.sheets['Differences']
                     for column in ws_diff.columns:
                         max_length = 0
@@ -729,6 +758,7 @@ def download_results(requirement):
                     df_at = df[base_cols + at_cols].copy()
                     df_at.columns = [c.replace('at_', '') if c.startswith('at_') else c for c in df_at.columns]
                     df_at.to_excel(writer, sheet_name='AT', index=False)
+                    sheets_written = True
                     ws_at = writer.sheets['AT']
                     for column in ws_at.columns:
                         max_length = 0
@@ -747,6 +777,7 @@ def download_results(requirement):
                     df_ccp = df[base_cols + ccp_cols].copy()
                     df_ccp.columns = [c.replace('ccp_', '') if c.startswith('ccp_') else c for c in df_ccp.columns]
                     df_ccp.to_excel(writer, sheet_name='CCP', index=False)
+                    sheets_written = True
                     ws_ccp = writer.sheets['CCP']
                     for column in ws_ccp.columns:
                         max_length = 0
@@ -758,6 +789,11 @@ def download_results(requirement):
                             except:
                                 pass
                         ws_ccp.column_dimensions[column_letter].width = max_length + 2
+                
+                # Fallback: create a sheet if no data sheets were written
+                if not sheets_written:
+                    pd.DataFrame({'Result': ['No configuration mismatches found']}).to_excel(
+                        writer, sheet_name='Summary Report', index=False)
         
         elif req_key == 'requirement_1':
             # Requirement 1: 2 sheets (Summary Report + Details)
@@ -1081,6 +1117,118 @@ def download_combined():
         return jsonify({
             'success': False,
             'error': f'Error downloading combined data: {str(e)}',
+            'type': 'download_error'
+        }), 500
+
+# ================================
+# ROUTES - DOWNLOAD DUPLICATES (CCP and AT)
+# ================================
+
+@app.route('/api/download/ccp-duplicates', methods=['GET'])
+def download_ccp_duplicates():
+    """Download CCP duplicate entries as Excel file"""
+    try:
+        if 'results_id' not in session or session['results_id'] not in RESULTS_CACHE:
+            return jsonify({
+                'success': False,
+                'error': 'No results available. Please run comparison first.',
+                'type': 'no_results'
+            }), 400
+        
+        results = RESULTS_CACHE[session['results_id']]
+        ccp_dups = results.get('ccp_duplicates', pd.DataFrame())
+        
+        if ccp_dups.empty:
+            return jsonify({
+                'success': False,
+                'error': 'No CCP duplicates found.',
+                'type': 'no_data'
+            }), 400
+        
+        # Remove internal temp columns if present
+        drop_cols = [c for c in ccp_dups.columns if c.startswith('_')]
+        if drop_cols:
+            ccp_dups = ccp_dups.drop(columns=drop_cols, errors='ignore')
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            ccp_dups.to_excel(writer, sheet_name='CCP Duplicates', index=False)
+            ws = writer.sheets['CCP Duplicates']
+            # Auto-size columns
+            for col_idx, col_name in enumerate(ccp_dups.columns, 1):
+                max_len = max(len(str(col_name)), ccp_dups[col_name].astype(str).str.len().max() if len(ccp_dups) > 0 else 0)
+                ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 40)
+        
+        output.seek(0)
+        filename = 'CCP_Duplicate_Entries.xlsx'
+        logger.info(f"Downloaded {filename}")
+        
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        logger.error(f"Error downloading CCP duplicates: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error downloading CCP duplicates: {str(e)}',
+            'type': 'download_error'
+        }), 500
+
+@app.route('/api/download/at-duplicates', methods=['GET'])
+def download_at_duplicates():
+    """Download AT duplicate entries as Excel file"""
+    try:
+        if 'results_id' not in session or session['results_id'] not in RESULTS_CACHE:
+            return jsonify({
+                'success': False,
+                'error': 'No results available. Please run comparison first.',
+                'type': 'no_results'
+            }), 400
+        
+        results = RESULTS_CACHE[session['results_id']]
+        at_dups = results.get('at_duplicates', pd.DataFrame())
+        
+        if at_dups.empty:
+            return jsonify({
+                'success': False,
+                'error': 'No AT duplicates found.',
+                'type': 'no_data'
+            }), 400
+        
+        # Remove internal temp columns if present
+        drop_cols = [c for c in at_dups.columns if c.startswith('_')]
+        if drop_cols:
+            at_dups = at_dups.drop(columns=drop_cols, errors='ignore')
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            at_dups.to_excel(writer, sheet_name='AT Duplicates', index=False)
+            ws = writer.sheets['AT Duplicates']
+            # Auto-size columns
+            for col_idx, col_name in enumerate(at_dups.columns, 1):
+                max_len = max(len(str(col_name)), at_dups[col_name].astype(str).str.len().max() if len(at_dups) > 0 else 0)
+                ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 40)
+        
+        output.seek(0)
+        filename = 'AT_Duplicate_Entries.xlsx'
+        logger.info(f"Downloaded {filename}")
+        
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        logger.error(f"Error downloading AT duplicates: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'Error downloading AT duplicates: {str(e)}',
             'type': 'download_error'
         }), 500
 
@@ -1539,10 +1687,12 @@ def download_zip():
                     # Requirement 3: 4 sheets (Summary, Differences, AT, CCP)
                     df = results[cache_key]
                     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        sheets_written = False
                         # Sheet 1: Summary Report (Pivot: column headers × exchanges)
                         pivot_df = results.get('requirement_3_pivot', pd.DataFrame())
                         if not pivot_df.empty:
                             pivot_df.to_excel(writer, sheet_name='Summary Report')
+                            sheets_written = True
                             ws_summary = writer.sheets['Summary Report']
                             # Auto-adjust widths
                             for column in ws_summary.columns:
@@ -1562,6 +1712,7 @@ def download_zip():
                         if available_diff:
                             df_diffs = df[available_diff].copy()
                             df_diffs.to_excel(writer, sheet_name='Differences', index=False)
+                            sheets_written = True
                             ws_diff = writer.sheets['Differences']
                             for column in ws_diff.columns:
                                 max_length = 0
@@ -1581,6 +1732,7 @@ def download_zip():
                             df_at = df[base_cols + at_cols].copy()
                             df_at.columns = [c.replace('at_', '') if c.startswith('at_') else c for c in df_at.columns]
                             df_at.to_excel(writer, sheet_name='AT', index=False)
+                            sheets_written = True
                             ws_at = writer.sheets['AT']
                             for column in ws_at.columns:
                                 max_length = 0
@@ -1599,6 +1751,7 @@ def download_zip():
                             df_ccp = df[base_cols + ccp_cols].copy()
                             df_ccp.columns = [c.replace('ccp_', '') if c.startswith('ccp_') else c for c in df_ccp.columns]
                             df_ccp.to_excel(writer, sheet_name='CCP', index=False)
+                            sheets_written = True
                             ws_ccp = writer.sheets['CCP']
                             for column in ws_ccp.columns:
                                 max_length = 0
@@ -1610,6 +1763,11 @@ def download_zip():
                                     except:
                                         pass
                                 ws_ccp.column_dimensions[column_letter].width = max_length + 2
+                        
+                        # Fallback: create a sheet if no data sheets were written
+                        if not sheets_written:
+                            pd.DataFrame({'Result': ['No configuration mismatches found']}).to_excel(
+                                writer, sheet_name='Summary Report', index=False)
                 
                 # Add file to ZIP
                 output.seek(0)
@@ -1662,6 +1820,7 @@ Generated: {timestamp}
     
     except Exception as e:
         logger.error(f"Error creating ZIP file: {str(e)}")
+        logger.error(f"ZIP traceback: {traceback.format_exc()}")
         return jsonify({
             'success': False,
             'error': f'Error creating ZIP file: {str(e)}',

@@ -61,6 +61,8 @@ class ComparisonEngine:
         self.ccp_combined = None
         self.ccp_symbol_col = None
         self.at_symbol_col = None
+        self.ccp_duplicates = pd.DataFrame()  # CCP duplicate entries removed during cleanup
+        self.at_duplicates = pd.DataFrame()   # AT duplicate entries removed during cleanup
         
     def compare(self):
         """
@@ -87,6 +89,10 @@ class ComparisonEngine:
             # Detect symbol columns
             self._detect_symbol_columns()
             logger.info("Symbol columns detected")
+            
+            # Clean AT duplicates before comparison
+            self._detect_and_remove_at_duplicates()
+            logger.info("AT duplicates checked")
             
             # Merge CCP data
             self._merge_ccp()
@@ -223,6 +229,87 @@ class ComparisonEngine:
             raise ValidationError(f"Could not detect symbol column in AT. Available: {list(self.at.columns)}")
     
     # ================================
+    # STEP 4b: DETECT AND REMOVE AT DUPLICATES
+    # ================================
+    
+    def _detect_and_remove_at_duplicates(self):
+        """
+        Detect and remove fully identical duplicate rows in AT Whitelist.
+        
+        AT sometimes contains exact duplicate rows (same symbol+exchange and
+        identical across all columns). These are removed before comparison.
+        The removed duplicates are stored for UI display.
+        """
+        sym_col = self.at_symbol_col
+        
+        # Create temp composite key for grouping
+        at_key = (self.at[sym_col].astype(str).str.strip().str.upper() + '|' +
+                  self.at['exchange'].astype(str).str.strip().str.upper())
+        
+        total_rows = len(self.at)
+        unique_keys = at_key.nunique()
+        dup_count = total_rows - unique_keys
+        
+        if dup_count == 0:
+            logger.info("No duplicate rows found in AT Whitelist")
+            return
+        
+        logger.info(f"Found {dup_count} duplicate rows in AT Whitelist ({total_rows} total, {unique_keys} unique keys)")
+        
+        # Find which keys are duplicated
+        self.at['_at_dup_key'] = at_key
+        dup_mask = self.at.duplicated(subset=['_at_dup_key'], keep=False)
+        dup_keys = self.at.loc[dup_mask, '_at_dup_key'].unique()
+        
+        # Collect one row per duplicate key (full data) for export
+        all_dup_rows = self.at[dup_mask].copy()
+        
+        # Add duplicate_count column (how many times each key appears)
+        key_counts = all_dup_rows['_at_dup_key'].value_counts()
+        all_dup_rows['duplicate_count'] = all_dup_rows['_at_dup_key'].map(key_counts)
+        
+        # Keep only one row per duplicate key for export
+        all_dup_rows = all_dup_rows.drop_duplicates(subset=['_at_dup_key'], keep='first').copy()
+        
+        # Try to add segment and tcl1 from CCP Security Whitelist data
+        if self.ccp_sec is not None:
+            ccp = self.ccp_sec.copy()
+            # Detect tcl1 column in CCP
+            tcl1_col = None
+            for col in ['tcl1', 'tcl_1', 'traded_products']:
+                if col in ccp.columns:
+                    tcl1_col = col
+                    break
+            
+            ccp_sym_col = self.ccp_symbol_col
+            if ccp_sym_col and 'segment' in ccp.columns:
+                ccp['_lookup_key'] = (
+                    ccp[ccp_sym_col].astype(str).str.strip().str.upper() + '|' +
+                    ccp['exchange'].astype(str).str.strip().str.upper()
+                )
+                # Build lookup dict for segment
+                seg_lookup = ccp.drop_duplicates(subset=['_lookup_key']).set_index('_lookup_key')['segment'].to_dict()
+                all_dup_rows['segment'] = all_dup_rows['_at_dup_key'].map(seg_lookup).fillna('')
+                
+                # Build lookup dict for tcl1
+                if tcl1_col:
+                    tcl1_lookup = ccp.drop_duplicates(subset=['_lookup_key']).set_index('_lookup_key')[tcl1_col].to_dict()
+                    all_dup_rows['tcl1'] = all_dup_rows['_at_dup_key'].map(tcl1_lookup).fillna('')
+        
+        # Remove the temp key column from export data
+        all_dup_rows.drop(columns=['_at_dup_key'], inplace=True, errors='ignore')
+        
+        self.at_duplicates = all_dup_rows
+        logger.info(f"AT duplicate rows: {len(all_dup_rows)}, unique keys: {len(dup_keys)}, removing {dup_count} extra rows")
+        
+        # Remove duplicates - keep first occurrence
+        self.at = self.at.drop_duplicates(subset=['_at_dup_key'], keep='first').copy()
+        self.at.drop(columns=['_at_dup_key'], inplace=True)
+        self.at.reset_index(drop=True, inplace=True)
+        
+        logger.info(f"AT after dedup: {len(self.at)} rows")
+    
+    # ================================
     # STEP 5: COMBINE CCP DATA (delegated to CCPCombiner)
     # ================================
     
@@ -235,9 +322,12 @@ class ComparisonEngine:
         combiner = CCPCombiner(self.ccp_sec, self.ccp_rules)
         combiner.combine()
         self.ccp_combined = combiner.get_combined()
+        self.ccp_duplicates = combiner.get_duplicates()
         # Store raw combined data before alignment (for download/review)
         self.ccp_combined_raw = self.ccp_combined.copy()
         logger.info("CCP combining delegated to CCPCombiner module")
+        if not self.ccp_duplicates.empty:
+            logger.info(f"CCP duplicates detected and removed: {len(self.ccp_duplicates)} entries")
     
     # ================================
     # STEP 6: PREPARE MAPPING
